@@ -1,0 +1,64 @@
+{% extends 'taxApp/basePage.html' %}
+{% block content %}
+<div class="centeredGrid">
+    <div class="d-flex flex-column">
+        <h3 class="centeredGrid">Import Transactions</h3>
+        <button id="importTxsBtn" class="btn btn-primary importBtn" data-url="{% url 'ajaxImportTransactions' %}">Get transactions</button>
+        <button id="getFeesBtn" class="btn btn-primary importBtn" data-url="{% url 'ajaxImportTxFees' %}">Get transaction fees</button>
+        <button id="getFeesBtn" class="btn btn-primary importBtn" data-url="{% url 'ajaxTxFeeSpends' %}">Get transaction fees AUD</button>
+    </div>
+</div>
+{% endblock content %}
+
+{% block inlineJS %}
+    <script>
+        $(document).ready(function(){
+
+            let poller;
+
+            async function poll(){
+                let res = await fetch("{% url 'ajaxPollTxFees' %}");
+                let response = await res.json();
+                console.log(response)
+                let tmpl;
+                if (response.ok){
+                    if (response.status == "running"){
+                        let prog = response.progress;
+                        tmpl = `
+                            <div>txFees are being processed...</div>
+                            <div class="progress">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" aria-valuenow="${prog}" aria-valuemin="0" aria-valuemax="100" style="width: ${prog}%">${prog}%</div>
+                            </div>
+                        `
+                    } else if (response.status != "running"){
+                        tmpl = `<div>${response.msg}</div>`
+                        clearInterval(poller);
+                    }
+                } else {
+                    tmpl = `<div>${response.msg}</div>`
+                }
+                $("#messageContent").html(tmpl)
+            }
+
+            {% if running %}
+                poll()
+                poller = setInterval(poll, 5000);
+            {% endif %}
+
+            $(".importBtn").click(async function() {
+                let url = $(this).data('url')
+                let resp = await fetch(url)
+                let res = await resp.json()
+
+                if (res.msg){
+                    $("#messageContent").text(res.msg);
+                    $("#message").slideDown();
+                }
+                if (res.running){
+                    poller = setInterval(poll, 5000);
+                }
+            })
+        });
+    </script>
+{% endblock inlineJS %}
+

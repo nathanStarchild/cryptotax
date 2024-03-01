@@ -1,0 +1,88 @@
+{% extends 'taxApp/basePage.html' %}
+{% block content %}
+    <div class="centeredGrid">
+        <div class="d-flex flex-column">
+            <h3 class="centeredGrid">Addresses</h3>
+            <table class="table table-bordered table-hover table-responsive-md">
+                <thead class="thead-light">
+                    <tr id="tableHead">
+                        <th class="text-center align-middle">Address</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for a in addresses %}
+                        <tr>
+                            <td>{{a.address}}</td>
+                        </tr>
+                    {% endfor %}
+                    <tr id="addRow"><button type="button" id="addRowBtn" class="btn btn-primary" data-bs-target="#newAddress" data-bs-toggle="modal"><i class="fas fa-plus"></i></button></tr>
+                </tbody>
+            </table>
+
+
+            <div class="modal fade" id="newAddress" tabindex="-1" aria-labelledby="newAddress" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-centered" role="document">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title title">New Address</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <form id="newAddressForm" method="post" action="{% url 'ajaxNewAddress' %}">
+                            <div class="modal-body">
+                                
+                                {% csrf_token %}
+                                <input type="hidden" name="user" value="{{user.id}}">
+                                
+                                <div class="inputRow">
+                                    <input type="text" class="form-control" name="address">
+                                </div>      
+                                
+                            </div>
+                            <div class="modal-footer">
+                                <button type="button" id="submitNewAddress" class="btn btn-primary">Submit</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+{% endblock content %}
+
+{% block inlineJS %}
+    <script>
+        $(document).ready(function(){
+            $("#submitNewAddress").click(async function() {
+                let $form = $("#newAddressForm")
+                let res = await postForm($form)
+
+                if (res.msg){
+                    $("#messageContent").text(res.msg);
+                    $("#message").slideDown();
+                }
+                if (res.errors){
+                    let errs = JSON.parse(res.errors)
+                    let msg = res.msg;
+                    console.log(msg)
+                    console.log(errs)
+                    for (const [key, err] of Object.entries(errs)){
+                        $($form).find(`input[name=${key}]`).addClass('is-invalid')
+                        if (key == "__all__") {
+                            $form.find("input").addClass('is-invalid')
+                        }
+                        msg += ` ${key}:`
+                        for (const m of err){
+                            msg += " " + m.message
+                        }
+                    }
+                    $("#messageContent").text(msg);
+                }
+                if (res.newAddress) {
+                    $("#addRow").before(`<tr><td>${newAddress}</td></tr>`)
+
+                }
+            })
+        });
+    </script>
+{% endblock inlineJS %}

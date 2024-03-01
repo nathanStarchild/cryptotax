@@ -1,0 +1,64 @@
+{% extends 'taxApp/basePage.html' %}
+{% block content %}
+    <div class="centeredGrid">
+        <div class="d-flex flex-column">
+            <h3 class="centeredGrid">Transaction</h3>
+            <table class="table table-bordered table-hover table-responsive-md">
+                <tbody>
+                    <tr>
+                        <th>Address</th>
+                        <td>{{tx.address.address}}</td>
+                    </tr>
+                    <tr>
+                        <th>Date</th>
+                        <td>{{tx.date|date:'d/m/Y'}}</td>
+                    </tr>
+                    <tr>
+                        <th>Chain</th>
+                        <td>{{tx.chain.name}}</td>
+                    </tr>
+                    <tr>
+                        <th>Hash</th>
+                        <td><a href="{{tx.explorerUrl}}">{{tx.txHash}}</a></td>
+                    </tr>
+                    <tr>
+                        <th>Value</th>
+                        <td>{{txValue|floatformat:"-4g"}} {{tx.feeCoin.symbol}}</td>
+                    </tr>
+                    <tr>
+                        <th>Fee</th>
+                        <td>{{tx.fee|floatformat:"-4g"}} {{tx.feeCoin.symbol}}</td>
+                    </tr>
+                    <tr>
+                        <th>Fee AUD</th>
+                        <td>${{tx.feeAUD|floatformat:"-2"}}</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div class="card card-lg">
+                <pre>{{ receipt | pprint }}</pre>
+            </div>
+            <div class="card card-lg">
+                <div class="d-flex flex-column">
+                    {% for log in logs %}
+                        <div class="mt-2">
+                            {% comment %} {{log}} {% endcomment %}
+                            {{log.logIndex}} {{log.event}}<br>
+                            {% for k, v in log.args.items %}
+                                {{k}}: {{v}}<br>
+                            {% endfor %}
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+{% endblock content %}
+
+{% block inlineJS %}
+    <script>
+        $(document).ready(function(){
+        });
+    </script>
+{% endblock inlineJS %}

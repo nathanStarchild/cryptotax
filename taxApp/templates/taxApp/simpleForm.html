@@ -1,0 +1,10 @@
+{% for field in form.visible_fields %}
+    {% if wide %}
+        <div class="inputCellWide">
+    {% else %}
+        <div class="inputCell">
+    {% endif %}
+        {{ field.label_tag }} 
+        {{ field }}
+    </div>
+{% endfor %}

@@ -1,0 +1,14 @@
+{% extends 'taxApp/basePage.html' %}
+{% block content %}
+    <form action="{% url 'importExchange' %}" enctype="multipart/form-data" method="post" class="centeredGrid">
+        {% csrf_token %}
+        <div class="d-flex flex-column justify-content-center align-items-start gap-2">
+            <h3 class="title inputContainer">Import Exchange data</h3>
+            {% include "taxApp/simpleForm.html" %}
+            <div class="inputCell2">
+                <input type="submit" value="Upload" class="btn btn-primary">
+            </div>
+        </div>
+    </form>
+{% endblock content %}
+

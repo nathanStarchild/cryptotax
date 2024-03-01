@@ -1,0 +1,111 @@
+html, body {
+    height: 100%;
+}
+
+body{
+    margin: 0px;
+    font-family: Muli, sans-serif;
+    background-color: #F0F0FA;
+    padding-top: 50px;
+}
+
+label{
+    font-weight: bold;
+    display: block;
+}
+
+.message{
+    margin-top: 80px;
+    margin-left: 10%;
+    margin-right: 10%;
+    background-color: #F8D939;
+}
+
+#message{
+    position: fixed;
+    top: 50px;
+    right: 0px;
+    left: 0px;
+    z-index: 999;
+}
+
+.pageGrid {
+    min-height: 100%;
+    max-height: 100vh;
+    display: grid;
+    grid-template-rows: 50px 1fr 50px;
+}
+
+.content {
+    height: 100%;
+}
+
+.mr-auto, .mx-auto {
+    margin-right: auto!important;
+}
+
+.nav-bg {
+    background-image:linear-gradient(to bottom, #4585ce, #559bdd);
+}
+
+.navbar .navbar-nav .nav-link, 
+.navbar .navbar-brand,
+.navbar .navbar-toggler {
+      color: rgba(255,255,255,.8);
+}
+
+.centeredGrid {
+    display: grid;
+    place-content: center;
+    height: 100%;
+}
+
+.card-sm {
+    margin: 0.3rem;
+    padding: 1rem;
+    max-width: 25rem;
+    height: min-content;
+    border: 1px solid rgba(0, 0, 0, .225);
+    border-radius: 0.35rem;
+    background-color: rgba(255,255,255, 0.2);
+}
+
+.card-md {
+    margin: 0.3rem;
+    padding: 1rem;
+    max-width: 30rem;
+    height: min-content;
+    border: 1px solid rgba(0, 0, 0, .225);
+    border-radius: 0.35rem;
+    background-color: rgba(255,255,255, 0.2);
+}
+
+.card-md-fixed {
+    margin: 0.3rem;
+    padding: 1rem;
+    width: 30rem;
+    height: min-content;
+    border: 1px solid rgba(0, 0, 0, .225);
+    border-radius: 0.35rem;
+    background-color: rgba(255,255,255, 0.2);
+}
+
+.card-lg {
+    margin: 0.3rem;
+    padding: 1rem;
+    max-width: 60rem;
+    height: min-content;
+    border: 1px solid rgba(0, 0, 0, .225);
+    border-radius: 0.35rem;
+    background-color: rgba(255,255,255, 0.2);
+}
+
+.card-lg-fixed {
+    margin: 0.3rem;
+    padding: 1rem;
+    width: 60rem;
+    height: min-content;
+    border: 1px solid rgba(0, 0, 0, .225);
+    border-radius: 0.35rem;
+    background-color: rgba(255,255,255, 0.2);
+}

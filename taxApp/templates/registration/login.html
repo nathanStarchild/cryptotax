@@ -1,0 +1,54 @@
+{% extends "taxApp/basePage.html" %}
+
+{% block message %}
+    {% if form.errors %}
+        <div class="alert alert-warning alert-dismissible fade show" role="alert">
+            <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                <span aria-hidden="true">&times;</span>
+            </button>
+            <p class="mb-0" align="center"><b>
+                Your username and password didn't match. Please try again.
+            </b></p>
+            
+        </div>
+            <p></p>
+    {% endif %}
+{% endblock message %}
+
+{% block content %}
+
+    <div id="loginBox" class="centeredGrid">
+        <div></div>
+        <div>
+            <h2>Login</h2>
+            {% if next %}
+                {% if user.is_authenticated %}
+                    <p>Your account doesn't have access to this page. To proceed,
+                    please login with an account that has access.</p>
+                {% else %}
+                    <p>Please login to see this page.</p>
+                {% endif %}
+            {% else %}
+                <p>Please insert your credentials:</p>
+            {% endif %}
+            <form name="login" method="post" action="{% url 'login' %}">
+                {% csrf_token %}
+                <div id="loginInput" class="d-flex flex-column justify-content-center align-items-start gap-2">
+                    {{ form.username.label_tag }}
+                    {{ form.username }}
+                    {{ form.password.label_tag }}
+                    {{ form.password }}
+                </div>
+                <div id="loginButtons" class="mt-2">
+                    <button type="submit" class="btn btn-primary" > Login </button>
+                    <input type="hidden" name="next" value="{{ next }}">
+                </div>
+                <p><a href="{% url 'password_reset' %}">Lost password?</a></p>
+            </form>
+        </div>
+        <div></div>
+    </div>
+
+{# Assumes you setup the password_reset view in your URLconf #}
+
+{% endblock %}

@@ -1,0 +1,66 @@
+{% extends 'taxApp/basePage.html' %}
+{% block content %}
+    <div class="centeredGrid">
+        <div class="d-flex flex-column">
+            <h3 class="centeredGrid">withdrawals</h3>
+            <table class="table table-bordered table-hover table-responsive-md">
+                <thead class="thead-light">
+                    <tr id="tableHead">
+                        <th class="text-center align-middle">Date</th>
+                        <th class="text-center align-middle">Coin</th>
+                        <th class="text-center align-middle">Units Sent</th>
+                        <th class="text-center align-middle">Units received</th>
+                        <th class="text-center align-middle">Fee</th>
+                        <th class="text-center align-middle">Fee AUD</th>
+                        <th class="text-center align-middle">Note</th>
+                        <th class="text-center align-middle">Reference ID</th>
+                        <th class="text-center align-middle">txID</th>
+                        <th class="text-center align-middle">transaction</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in data %}
+                        <tr>
+                            <td>{{d.date|date:'d/m/Y'}}</td>
+                            <td>{{d.coin.symbol}}</td>
+                            <td class="text-end">{{d.unitsSent|floatformat:"-4g"}}</td>
+                            <td class="text-end">
+                                {% if not d.unitsReceived %}
+                                    <input type="text" name="received" class="form-control receivedInput" data-url="{% url "ajaxAddWithdrawalReceived" d.id %}">
+                                {% else %}
+                                    {{d.unitsReceived|floatformat:"-4g"}}
+                                {% endif %}
+                            </td>
+                            <td class="text-end">{{d.fee|floatformat:"-4g"}} {{d.coin.symbol}}</td>
+                            <td class="text-end">${{d.feeAUD|floatformat:"-2"}}</td>
+                            <td>{{d.note}}</td>
+                            <td>{{d.refId}}</td>
+                            <td>{{d.txId}}</td>
+                            <td>{{d.transaction}}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+{% endblock content %}
+
+{% block inlineJS %}
+    <script>
+        $(document).ready(function(){
+            $(".receivedInput").change(async function() {
+                $("#message").slideUp();
+                let url = $(this).data('url')
+                let data = $(this).serializeArray()
+                data.push({'name': 'csrfmiddlewaretoken', 'value': '{{ csrf_token }}'})
+                let res = await postData(url, $.param(data))
+
+                if (res.msg){
+                    $("#messageContent").text(res.msg);
+                    $("#message").slideDown();
+                }
+            })
+        });
+    </script>
+{% endblock inlineJS %}
