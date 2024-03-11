@@ -208,7 +208,7 @@ class TokenBridge(models.Model):
 
 class Vault(models.Model):
     chain = models.ForeignKey(Chain, on_delete=models.CASCADE)
-    name = models.CharField(max_length=40)
+    name = models.CharField(max_length=40, blank=True, null=True)
     address = AddressField()
 
     class Meta:
