@@ -1,0 +1,66 @@
+{% extends 'taxApp/basePage.html' %}
+{% block content %}
+    <div class="centeredGrid">
+        <div class="d-flex flex-column">
+            <h3 class="centeredGrid">Tokens</h3>
+            {% for d in new %}
+                <form action="{% url 'ajaxNewToken' %}" id="coinForm-{{forloop.counter}}">
+                    {% csrf_token %}
+                    <input type="hidden" name="address" value={{d.address}}>
+                    <input type="hidden" name="chain" value={{d.chain.id}}>
+                </form>
+            {% endfor %}
+            <table class="table table-bordered table-hover table-responsive-md">
+                <thead class="thead-light">
+                    <tr id="tableHead">
+                        <th class="text-center align-middle">Address</th>
+                        <th class="text-center align-middle">Chain</th>
+                        <th class="text-center align-middle">Name</th>
+                        <th class="text-center align-middle">Coin</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in new %}
+                        <tr>
+                            <td><a href="{{d.explorerUrl}}">{{d.address}}</a></td>
+                            <td>{{d.chain.name}}</td>
+                            <td>{{d.name}}</td>
+                            <td data-form="coinForm-{{forloop.counter}}" data-n="{{forloop.counter}}">
+                                <select 
+                                    form="coinForm-{{forloop.counter}}" 
+                                    class="coinSelect form-control" 
+                                    name="coin" 
+                                    autoconplete="off" 
+                                    data-test="thisisatest" 
+                                    data-url="/ajax/coins/search/"
+                                    data-addClass="hidden-{{forloop.counter}}"
+                                >
+                                </select>
+                            </td>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+{% endblock content %}
+
+{% block inlineJS %}
+    <script>
+        $(document).ready(function(){
+            $(".coinSelect").autoComplete()
+            $('.coinSelect').on('autocomplete.select', async (event, item) => {
+                $("#message").slideUp();
+                let n = $(event.currentTarget).closest("td").data('n')
+                let formName = $(event.currentTarget).closest("td").data('form')
+                $(`.hidden-${n}`).attr("form", formName)
+                form = $(`#${formName}`)
+                let res = postForm(form)
+                if (res.msg){
+                    $("#messageContent").text(res.msg);
+                    $("#message").slideDown();
+                }
+            });
+        });
+    </script>
+{% endblock inlineJS %}

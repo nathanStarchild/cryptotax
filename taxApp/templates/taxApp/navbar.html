@@ -25,6 +25,8 @@
                         <ul class="dropdown-menu" aria-labelledby="ImportDropdown">
                             <li><a class="dropdown-item" href="{% url 'importExchange' %}">Import Exchange Trades</a></li>
                             <li><a class="dropdown-item" href="{% url 'importTransactions' %}">Import Onchain Transactions</a></li>
+                            <li><a class="dropdown-item" href="{% url 'importTokens' %}">Import Tokens</a></li>
+                            <li><a class="dropdown-item" href="{% url 'testAutocomplete' %}">testAutocomplete</a></li>
                         </ul>
                     </li>
                     <li class="nav-item dropdown pad-left">
@@ -36,6 +38,8 @@
                             <li><a class="dropdown-item" href="{% url 'salesReport' %}">Sales</a></li>
                             <li><a class="dropdown-item" href="{% url 'transactionsReport' %}">Transactions</a></li>
                             <li><a class="dropdown-item" href="{% url 'withdrawalsReport' %}">Exchange Withdrawals</a></li>
+                            <li><a class="dropdown-item" href="{% url 'tokensReport' %}">Tokens</a></li>
+                            <li><a class="dropdown-item" href="{% url 'holdingsReport' %}">Holdings</a></li>
                         </ul>
                     </li>
                 {% else %}:

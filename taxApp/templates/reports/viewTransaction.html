@@ -1,4 +1,5 @@
 {% extends 'taxApp/basePage.html' %}
+{% load token_utils %}
 {% block content %}
     <div class="centeredGrid">
         <div class="d-flex flex-column">
@@ -6,7 +7,7 @@
             <table class="table table-bordered table-hover table-responsive-md">
                 <tbody>
                     <tr>
-                        <th>Address</th>
+                        <th>From</th>
                         <td>{{tx.address.address}}</td>
                     </tr>
                     <tr>
@@ -19,11 +20,15 @@
                     </tr>
                     <tr>
                         <th>Hash</th>
-                        <td><a href="{{tx.explorerUrl}}">{{tx.txHash}}</a></td>
+                        <td><a href="{{tx.explorerUrl}}">{{tx.hash}}</a></td>
+                    </tr>
+                    <tr>
+                        <th>to</th>
+                        <td>{{tx.toAddr.address}}</td>
                     </tr>
                     <tr>
                         <th>Value</th>
-                        <td>{{txValue|floatformat:"-4g"}} {{tx.feeCoin.symbol}}</td>
+                        <td>{{tx.value|floatformat:"-4g"}} {{tx.feeCoin.symbol}}</td>
                     </tr>
                     <tr>
                         <th>Fee</th>
@@ -33,22 +38,99 @@
                         <th>Fee AUD</th>
                         <td>${{tx.feeAUD|floatformat:"-2"}}</td>
                     </tr>
+                    <tr>
+                        <th>Out</th>
+                        <td>
+                            {% for d in tx.internaltransaction_set.all %}
+                                {% if d.fromAddr.user == user %}
+                                    <div>{{d.value|floatformat:"-4g"}} {{d.coin.symbol}}</div>
+                                {% endif %}
+                            {% endfor %}
+                            {% for d in tx.tokentransfer_set.all %}
+                                {% if d.fromAddr.user == user %}
+                                    <div>{{d.value|floatformat:"-4g"}} {{d.coin.symbol}}</div>
+                                {% endif %}
+                            {% endfor %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>In</th>
+                        <td>
+                            {% for d in tx.internaltransaction_set.all %}
+                                {% if d.toAddr.user == user %}
+                                    <div>{{d.value|floatformat:"-4g"}} {{d.coin.symbol}}</div>
+                                {% endif %}
+                            {% endfor %}
+                            {% for d in tx.tokentransfer_set.all %}
+                                {% if d.toAddr.user == user %}
+                                    <div>{{d.value|floatformat:"-4g"}} {{d.coin.symbol}}</div>
+                                {% endif %}
+                            {% endfor %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <th>Processed</th>
+                        <td>{% if tx.processed %}<i class="fas fa-check"></i>{% endif %}</td>
+                    </tr>
                 </tbody>
             </table>
-            <div class="card card-lg">
-                <pre>{{ receipt | pprint }}</pre>
-            </div>
+
             <div class="card card-lg">
                 <div class="d-flex flex-column">
+                    <div class="centeredGrid"><b>Process Transaction</b></div>
+                    <div class="mt-2 d-flex flex-row justify-content-center">
+                        {% if tx.processed %}
+                            <p>Processed</p>
+                        {% else %} 
+                            <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxProcessBridgeSend' tx.id %}">As Bridge Send</button>    
+                        {% endif %}
+                    </div>
+                    <div class="mt-2 d-flex flex-row justify-content-center">
+                        <a href="{% url 'nextUnprocessed' tx.id 'new' %}" class="btn btn-primary m-1"><i class="fas fa-angle-left"></i></a>
+                        <a href="{% url 'nextUnprocessed' tx.id 'old' %}" class="btn btn-primary m-1"><i class="fas fa-angle-right"></i></a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card card-lg">
+                <div class="d-flex flex-column">
+                    <div class="centeredGrid"><b>Input</b></div>
+                    {{inputs|pprint}}
+                </div>
+            </div>
+
+            <div class="card card-lg">
+                <div class="d-flex flex-column">
+                    <div class="centeredGrid"><b>Logs</b></div>
                     {% for log in logs %}
                         <div class="mt-2">
                             {% comment %} {{log}} {% endcomment %}
-                            {{log.logIndex}} {{log.event}}<br>
+                            {{log.logIndex}} {{log.event}} {{log.address|get_token}}<br>
                             {% for k, v in log.args.items %}
                                 {{k}}: {{v}}<br>
                             {% endfor %}
                         </div>
                     {% endfor %}
+                </div>
+            </div>
+
+            <div class="card card-lg">
+                <div class="d-flex flex-column">
+                    <div class="centeredGrid"><b>full transaction</b></div>
+                    {% for k,v in txDetails.items %}
+                    <div class="mt-2">{{k}}: {{v}}</div>
+                    {% endfor %}
+                    {% comment %} {{receipt.result|pprint}} {% endcomment %}
+                </div>
+            </div>
+
+            <div class="card card-lg">
+                <div class="d-flex flex-column">
+                    <div class="centeredGrid"><b>full receipt</b></div>
+                    {% for k,v in receipt.result.items %}
+                    <div class="mt-2">{{k}}: {{v}}</div>
+                    {% endfor %}
+                    {% comment %} {{receipt.result|pprint}} {% endcomment %}
                 </div>
             </div>
         </div>
@@ -59,6 +141,16 @@
 {% block inlineJS %}
     <script>
         $(document).ready(function(){
+            $(".processBtn").click(async function() {
+                let url = $(this).data('url')
+                let resp = await fetch(url)
+                let res = await resp.json()
+
+                if (res.msg){
+                    $("#messageContent").text(res.msg);
+                    $("#message").slideDown();
+                }
+            })
         });
     </script>
 {% endblock inlineJS %}

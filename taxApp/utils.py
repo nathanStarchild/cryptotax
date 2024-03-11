@@ -5,10 +5,15 @@ import datetime
 import time
 import os
 import requests
+from zoneinfo import ZoneInfo
 
-cg = CoinGeckoAPI()
+cg = CoinGeckoAPI(api_key=os.environ.get('COINGECKO_APIKEY'))
+# cg = CoinGeckoAPI(api_key='notanapikey')
 
 def getPrice(coin, date):
+    now = date == "now"
+    if now:
+        date = datetime.datetime.now().astimezone(ZoneInfo('UTC'))
     try:
         p = HistoricalPrice.objects.get(coin=coin, date__date=date.date())
         return p.price
@@ -19,8 +24,12 @@ def getPrice(coin, date):
         print("fetching")
         #to limit it to 30 calls/min
         time.sleep(3)
-        data = cg.get_coin_history_by_id(id=coin.coingecko_id, date=date.strftime("%d-%m-%Y"), localization=False)
-        price = Decimal(data['market_data']['current_price']['aud'])
+        if now:
+            res = cg.get_price(ids=coin.coingecko_id, vs_currencies='aud')
+            price = Decimal(res[coin.coingecko_id]['aud'])
+        else:
+            data = cg.get_coin_history_by_id(id=coin.coingecko_id, date=date.strftime("%d-%m-%Y"), localization=False)
+            price = Decimal(data['market_data']['current_price']['aud'])
         savePrice(coin, price, date)
         return price
 

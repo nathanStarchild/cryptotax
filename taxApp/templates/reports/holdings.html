@@ -1,0 +1,33 @@
+{% extends 'taxApp/basePage.html' %}
+{% block content %}
+    <div class="centeredGrid">
+        <div class="d-flex flex-column">
+            <h3 class="centeredGrid">Holdings</h3>
+            <table class="table table-bordered table-hover table-responsive-md">
+                <thead class="thead-light">
+                    <tr id="tableHead">
+                        <th class="text-center align-middle">Coin</th>
+                        <th class="text-center align-middle">Units</th>
+                        <th class="text-center align-middle">Price</th>
+                        <th class="text-center align-middle">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr class="top-border table-light">
+                        <th colspan='3'>Total</th>
+                        <th class="text-end">${{total|floatformat:"-4g"}}</th>
+                    </tr>
+                    {% for d in data %}
+                        <tr>
+                            <td>{{d.coin.symbol}}</td>
+                            <td class="text-end">{{d.holding|floatformat:"-4g"}}</td>
+                            <td class="text-end">${{d.price|floatformat:"-4g"}}</td>
+                            <td class="text-end">${{d.value|floatformat:"-4g"}}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+{% endblock content %}

@@ -5,6 +5,7 @@ from django.core.files.base import ContentFile, File
 from gnosis.eth.django.models import EthereumAddressV2Field as AddressField, Uint256Field, HexV2Field as HexField
 from decimal import *
 import json
+import datetime
 
 
 ABIStorage = FileSystemStorage(location="assets/abis", base_url="/static/abis/")
@@ -33,7 +34,7 @@ class User(models.Model):
         return self.name
 
 class Address(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, blank=True, null=True)
     address = AddressField()
 
     class Meta:
@@ -43,7 +44,7 @@ class Address(models.Model):
 class Coin(models.Model):
     name = models.CharField(max_length=120)
     symbol = models.CharField(max_length=120)
-    coingecko_id = models.CharField(max_length=120)
+    coingecko_id = models.CharField(max_length=120, blank=True, null=True)
     
     class Meta:
         managed = True
@@ -68,24 +69,31 @@ class Token(models.Model):
     class Meta:
         managed = True
         db_table = 'tokens'
+        unique_together = ('chain', 'address')
+
+    def explorerUrl(self):
+        return f"https://{self.chain.explorer}/address/{self.address}"
 
 class Transaction(models.Model):
     feeCoin = models.ForeignKey(Coin, on_delete=models.CASCADE, blank=True, null=True)
     fee = models.DecimalField(max_digits=79, decimal_places=18, blank=True, null=True)
     feeAUD = models.DecimalField(max_digits=79, decimal_places=2, blank=True, null=True)
-    address = models.ForeignKey(Address, on_delete=models.CASCADE)
-    txHash = models.CharField(max_length=66)
+    hash = models.CharField(max_length=66)
     chain = models.ForeignKey(Chain, on_delete=models.CASCADE)
     date = models.DateTimeField()
     processed = models.BooleanField(default=False)
+    value = models.DecimalField(max_digits=79, decimal_places=18, blank=True, null=True)
+    note = models.CharField(max_length=128, blank=True, null=True)
+    fromAddr = models.ForeignKey(Address, on_delete=models.CASCADE, related_name="transactions_from", blank=True, null=True)
+    toAddr = models.ForeignKey(Address, on_delete=models.CASCADE, related_name="transactions_to", blank=True, null=True)
 
     class Meta:
         managed = True
         db_table = 'transactions'
-        unique_together = ('address', 'txHash', 'chain')
+        unique_together = ('hash', 'chain')
 
     def explorerUrl(self):
-        return f"https://{self.chain.explorer}/tx/{self.txHash}"
+        return f"https://{self.chain.explorer}/tx/{self.hash}"
     
     def createFeeSpend(self):
         if self.fee and self.feeCoin and self.feeAUD:
@@ -96,9 +104,29 @@ class Transaction(models.Model):
                 date = self.date,
                 user = self.address.user,
                 note = f"transaction {self.id}",
-                description = f"transaction fee tx {self.txHash}"
+                description = f"transaction fee tx {self.hash}"
             )
             s.save()
+
+class InternalTransaction(models.Model):
+    transaction = models.ForeignKey(Transaction, on_delete=models.CASCADE)
+    fromAddr = models.ForeignKey(Address, on_delete=models.CASCADE, related_name="internalTxFrom")
+    toAddr = models.ForeignKey(Address, on_delete=models.CASCADE, related_name="internalTxTo")
+    coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
+    value = models.DecimalField(max_digits=79, decimal_places=18)
+
+    class Meta:
+        unique_together = ('transaction', 'fromAddr', 'toAddr', 'coin', 'value')
+
+class TokenTransfer(models.Model):
+    transaction = models.ForeignKey(Transaction, on_delete=models.CASCADE)
+    fromAddr = models.ForeignKey(Address, on_delete=models.CASCADE, related_name="tokenTransferFrom")
+    toAddr = models.ForeignKey(Address, on_delete=models.CASCADE, related_name="tokenTransferTo")
+    coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
+    value = models.DecimalField(max_digits=79, decimal_places=18)
+
+    class Meta:
+        unique_together = ('transaction', 'fromAddr', 'toAddr', 'coin', 'value')
 
 class ExchangeWithdrawal(models.Model):
     coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
@@ -126,6 +154,57 @@ class ExchangeWithdrawal(models.Model):
                 description = "withdrawal fee"
             )
             s.save()
+
+class TokenBridge(models.Model):
+    coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
+    unitsSent = models.DecimalField(max_digits=79, decimal_places=18, )
+    unitsReceived = models.DecimalField(max_digits=79, decimal_places=18, blank=True, null=True)
+    date = models.DateTimeField()
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    transactionSend = models.ForeignKey(Transaction, on_delete=models.SET_NULL, blank=True, null=True, related_name='bridge_send')
+    transactionReceive = models.ForeignKey(Transaction, on_delete=models.SET_NULL, blank=True, null=True, related_name='bridge_receive')
+    feeCoin = models.ForeignKey(Coin, on_delete=models.CASCADE, blank=True, null=True, related_name='bridge_fee')
+    fee = models.DecimalField(max_digits=79, decimal_places=18, blank=True, null=True)
+    feeAUD = models.DecimalField(max_digits=79, decimal_places=2, blank=True, null=True)
+    refId = models.CharField(max_length=120, blank=True, null=True)
+    note = models.CharField(max_length=120, blank=True, null=True)
+    txId = models.CharField(max_length=66, blank=True, null=True)
+
+    def createFeeSpend(self):
+        if self.fee and self.feeCoin and self.feeAUD:
+            s = Spend(
+                coin = self.coin,
+                units = self.fee,
+                unitPrice = self.feeAUD / self.fee,
+                date = self.date,
+                user = self.user,
+                note = f"TokenBridge {self.id}",
+                description = "Bridging fee"
+            )
+            s.save()
+        else:
+            raise ValueError('fee is unkown, cannot create Spend')
+
+    def tryToFindReceiveTransaction(self):
+        from taxApp.importScripts.onchainTransactions import getTransfersInOut
+        timeTo = self.date + datetime.timedelta(hours=1)
+        print(self.date)
+        print(timeTo)
+        txs = Transaction.objects.filter(
+            date__range=(self.date, timeTo)
+        ).order_by('date')
+        print(txs.values('to'))
+        for tx in txs:
+            incoming, _ = getTransfersInOut(tx, addresses=[a.address for a in self.user.address_set.all()])
+            if incoming:
+                for inc in incoming:
+                    if inc['coin'] == self.coin:
+                        self.unitsReceived = inc['amount']
+                        self.transactionReceive = tx
+                        print(f"found transfer in. sent: {self.unitsSent}, received:{self.unitsReceived}")
+                        print(f"tx send: {self.transactionSend.hash} receive: {self.transactionReceive.hash}")
+                        self.save()
+                        return
 
 class CostBasis(models.Model):
     coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
@@ -303,6 +382,9 @@ class Contract(models.Model):
     def saveABI(self, datString):
         with open("tmp/tmp.abi", 'w') as f:
             self.abi.save(f"{self.address}.abi", ContentFile(datString), save=False)
+
+    def explorerUrl(self):
+        return f"https://{self.chain.explorer}/address/{self.address}"
 
 
 

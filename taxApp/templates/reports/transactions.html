@@ -13,18 +13,20 @@
                         <th class="text-center align-middle">Hash</th>
                         <th class="text-center align-middle">Fee</th>
                         <th class="text-center align-middle">Fee AUD</th>
+                        <th class="text-center align-middle">Processed</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for d in data %}
                         <tr>
                             <td><a href="{% url 'viewTransaction' d.id %}">{{d.id}}</td>
-                            <td>{{d.address.address}}</td>
+                            <td>{{d.fromAddr.address}}</td>
                             <td>{{d.date|date:'d/m/Y'}}</td>
                             <td>{{d.chain.name}}</td>
-                            <td><a href="{{d.explorerUrl}}">{{d.txHash}}</a></td>
+                            <td><a href="{{d.explorerUrl}}">{{d.hash}}</a></td>
                             <td class="text-end">{{d.fee|floatformat:"-4g"}} {{d.feeCoin.symbol}}</td>
                             <td class="text-end">${{d.feeAUD|floatformat:"-2"}}</td>
+                            <td>{% if d.processed %}<i class="fas fa-check"></i>{% endif %}
                         </tr>
                     {% endfor %}
                 </tbody>

@@ -24,3 +24,10 @@ class newAddressForm(forms.ModelForm):
     class Meta:
         model = Address
         fields = "__all__"
+
+
+class newTokenForm(forms.ModelForm):
+
+    class Meta:
+        model = Token
+        fields = "__all__"

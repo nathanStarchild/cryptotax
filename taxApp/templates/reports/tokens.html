@@ -1,0 +1,33 @@
+{% extends 'taxApp/basePage.html' %}
+{% block content %}
+    <div class="centeredGrid">
+        <div class="d-flex flex-column">
+            <h3 class="centeredGrid">Tokens</h3>
+            <table class="table table-bordered table-hover table-responsive-md">
+                <thead class="thead-light">
+                    <tr id="tableHead">
+                        <th class="text-center align-middle">Coin</th>
+                        <th class="text-center align-middle">Chain</th>
+                        <th class="text-center align-middle">Address</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in data %}
+                        <tr>
+                            <td>{{d.coin.name}}</td>
+                            <td>{{d.chain.name}}</td>
+                            <td><a href="{{d.explorerUrl}}">{{d.address}}</a></td>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+{% endblock content %}
+
+{% block inlineJS %}
+    <script>
+        $(document).ready(function(){
+        });
+    </script>
+{% endblock inlineJS %}

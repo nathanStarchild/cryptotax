@@ -3,9 +3,26 @@
 <div class="centeredGrid">
     <div class="d-flex flex-column">
         <h3 class="centeredGrid">Import Transactions</h3>
-        <button id="importTxsBtn" class="btn btn-primary importBtn" data-url="{% url 'ajaxImportTransactions' %}">Get transactions</button>
-        <button id="getFeesBtn" class="btn btn-primary importBtn" data-url="{% url 'ajaxImportTxFees' %}">Get transaction fees</button>
-        <button id="getFeesBtn" class="btn btn-primary importBtn" data-url="{% url 'ajaxTxFeeSpends' %}">Get transaction fees AUD</button>
+        <div class="d-flex flex-row justify-content-center">
+            <button id="importTxsBtn" class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportTransactions' %}">Get new outgoing transactions</button>
+            <button class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportIncomingTransactions' %}">Get new incoming transactions</button>
+            <button class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportIncomingInternal' %}">Get new incoming internal transactions</button>
+            <button class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportTokenTransfers' %}">Get new token transfers</button>
+            <button id="getTosBtn" class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportTxTos' %}">Get transaction "to" addresses</button>
+            <button id="getFeesBtn" class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportTxFees' %}">Get transaction fees</button>
+            <button id="getFeesBtn" class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxTxFeeSpends' %}">Get transaction fees AUD</button>
+            <button id="getValuesBtn" class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportTxValues' %}">Get transaction values</button>
+        </div>
+        <div>
+            <div class="title">Process Transactions</div>
+            <p>{{unprocessed}} unprocessed transactions</p>
+            <div class="mt-2 d-flex flex-row justify-content-center">
+                <button id="approvalssBtn" class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxProcessApprovals' %}">Mark approvals as processed</button>
+                <button id="dexTradesBtn" class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxProcessDexTrades' %}">Process DEX trades</button>
+                <button class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxProcessDepositsAndSends' %}">Process deposits and sends</button>
+                {% comment %} <button id="dexTradesBtn" class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxProcessDexOops' %}">fix DEX oops</button> {% endcomment %}
+            </div>
+        </div>
     </div>
 </div>
 {% endblock content %}
