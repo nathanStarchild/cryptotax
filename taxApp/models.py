@@ -206,6 +206,36 @@ class TokenBridge(models.Model):
                         self.save()
                         return
 
+class Vault(models.Model):
+    chain = models.ForeignKey(Chain, on_delete=models.CASCADE)
+    name = models.CharField(max_length=40)
+    address = AddressField()
+
+    class Meta:
+        unique_together = ('chain', 'address')
+
+class VaultDeposit(models.Model):
+    vault = models.ForeignKey(Vault, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
+    amount = models.DecimalField(max_digits=79, decimal_places=18)
+    transaction = models.ForeignKey(Transaction, on_delete=models.CASCADE)
+
+    class Meta:
+        unique_together = ('vault', 'transaction')
+
+class VaultWithdrawal(models.Model):
+    vault = models.ForeignKey(Vault, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
+    amount = models.DecimalField(max_digits=79, decimal_places=18)
+    transaction = models.ForeignKey(Transaction, on_delete=models.CASCADE)
+
+    class Meta:
+        unique_together = ('vault', 'transaction')
+
+
+
 class CostBasis(models.Model):
     coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
     units = models.DecimalField(max_digits=79, decimal_places=18, )
