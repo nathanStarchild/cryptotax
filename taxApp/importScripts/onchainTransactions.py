@@ -16,6 +16,8 @@ import traceback
 from importlib import import_module
 from django.conf import settings
 from django.db import transaction, connection
+from django.db.models import Sum
+from django.db.models.functions import Coalesce
 
 
 
@@ -685,6 +687,82 @@ def processBridgeSend(tx, web3=None, decodedLogs=None):
     print("TokenBridge created")
     return "processed as TokenBridge"
 
+def processVaultDeposit(tx, web3=None):
+    if web3 is None:
+        web3 = getWeb3(tx.chain)
+    vault, created = Vault.objects.get_or_create(chain=tx.chain, address=tx.toAddr.address)
+    if created:
+        vault.name = getContractName(vault.address, tx.chain, web3)
+    outs = tx.tokentransfer_set.filter(fromAddr=tx.fromAddr)
+    assert outs.count() <= 1, f"hhhmmm, too many outgoing transfers {outs.values()}"
+    if not outs.exists():
+        amount = tx.value
+        coin = tx.feeCoin
+        assert amount > 0, f"No transfers out and no tx value? {tx.hash}"
+    else:
+        amount = outs[0].value
+        coin = outs[0].coin
+
+    d = VaultDeposit(
+        vault = vault,
+        user = tx.fromAddr.user,
+        coin = coin,
+        amount = amount,
+        transaction = tx
+    )
+    d.save()
+    return "vault deposit processed"
+
+def getVaultNames():
+    for v in Vault.objects.filter(name__isnull=True):
+        v.name = getContractName(v.address, v.vaultdeposit_set.first().transaction.chain)
+        v.save()
+
+def processVaultWithdrawal(tx, web3=None):
+    if web3 is None:
+        web3 = getWeb3(tx.chain)
+    vault = Vault.objects.get(chain=tx.chain, address=tx.toAddr.address)
+    ins = tx.tokentransfer_set.filter(toAddr=tx.fromAddr)
+    assert ins.count() <= 1, f"hhhmmm, too many incoming transfers {ins.values()}"
+    if not ins.exists():
+        ins = tx.internaltransaction_set.filter(toAddr=tx.fromAddr)
+        assert ins.count() == 1, f"hhhmmm, too many incoming transfers {ins.values()}"
+
+    amount = ins[0].value
+    coin = ins[0].coin
+
+    deposits = vault.vaultdeposit_set.all().aggregate(total=Coalesce(Sum('value'), Decimal(0)))['total']
+    withdrawals = vault.vaultwithdrawal_set.all().aggregate(total=Coalesce(Sum('value'), Decimal(0)))['total']
+    balance = deposits - withdrawals
+
+    income = amount - balance
+    withdrawn = amount - income
+
+    w = VaultWithdrawal(
+        vault = vault,
+        user = tx.fromAddr.user,
+        coin = coin,
+        amount = withdrawn,
+        transaction = tx
+    )
+    w.save()
+
+    price = getPrice(coin, tx.date)
+    incomeAUD = income * price - tx.feeAUD
+
+    i = Income(
+        coin = coin,
+        units = income,
+        unitPrice = price,
+        date = tx.date,
+        user = tx.fromAddr.user,
+        note = f"income from {vault.name} - {vault.address}",
+        amount = incomeAUD,
+    )
+    i.save()
+    i.refresh_from_db()
+    i.createCostBasis()
+
 
 def processDexTrade(tx):
     print(tx.hash)
@@ -1014,6 +1092,8 @@ def getContractName(address, chain, web3=None, contract=None):
         web3 = getWeb3(chain)
     if contract is None:
         contract = loadContract(address, chain, web3)
+        if not contract:
+            return None
     try:
         name =  contract.functions.name().call()
     except ABIFunctionNotFound:

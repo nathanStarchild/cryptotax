@@ -6,7 +6,7 @@ from gnosis.eth.django.models import EthereumAddressV2Field as AddressField, Uin
 from decimal import *
 import json
 import datetime
-
+from taxApp.utils import getPrice
 
 ABIStorage = FileSystemStorage(location="assets/abis", base_url="/static/abis/")
 
@@ -214,6 +214,9 @@ class Vault(models.Model):
     class Meta:
         unique_together = ('chain', 'address')
 
+    def explorerUrl(self):
+        return f"https://{self.chain.explorer}/address/{self.address}"
+
 class VaultDeposit(models.Model):
     vault = models.ForeignKey(Vault, on_delete=models.CASCADE)
     user = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -234,7 +237,32 @@ class VaultWithdrawal(models.Model):
     class Meta:
         unique_together = ('vault', 'transaction')
 
+class VaultIncome(models.Model):
+    vault = models.ForeignKey(Vault, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
+    amount = models.DecimalField(max_digits=79, decimal_places=18)
+    transaction = models.ForeignKey(Transaction, on_delete=models.CASCADE)
+    income = models.ForeignKey("Income", on_delete=models.SET_NULL, blank=True, null=True)
 
+    class Meta:
+        unique_together = ('vault', 'transaction')
+
+    def createIncome(self):
+        price = getPrice(self.coin, self.transaction.date)
+        i = Income(
+            coin = self.coin,
+            units = self.amount,
+            unitPrice = price,
+            date = self.transaction.date,
+            user = self.user,
+            note = f"Income from {self.vault.name}",
+            amount = self.amount * price,
+        )
+        i.save()
+        self.income = i
+        self.save()
+        i.createCostBasis()
 
 class CostBasis(models.Model):
     coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
@@ -333,7 +361,7 @@ class Income(models.Model):
     unitPrice = models.DecimalField(max_digits=79, decimal_places=18, )
     date = models.DateTimeField()
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    note = models.CharField(max_length=30, blank=True, null=True)
+    note = models.CharField(max_length=128, blank=True, null=True)
     amount = models.DecimalField(max_digits=79, decimal_places=2, )
     costBasis = models.OneToOneField(CostBasis, on_delete=models.CASCADE, blank=True, null=True)
 
@@ -352,6 +380,19 @@ class Income(models.Model):
                 price=self.unitPrice
             )
             h.save()
+
+    def createCostBasis(self):
+        c = CostBasis(
+            coin = self.coin,
+            units = self.units,
+            unitPrice = self.unitPrice,
+            date = self.date,
+            user = self.user,
+            remaining = self.units,
+        )
+        c.save()
+        self.costBasis = c
+        self.save()
 
 class Spend(models.Model):
     coin = models.ForeignKey(Coin, on_delete=models.CASCADE)

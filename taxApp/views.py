@@ -516,6 +516,27 @@ def ajaxProcessBridgeSend(request, txId):
     except Exception as e:
         print(traceback.format_exc())
         return JsonResponse({"ok":False, "msg":traceback.format_exc()})
+    
+@login_required
+def ajaxProcessVaultDeposit(request, txId):
+    try:
+        user = request.user.cryptoTaxUser
+        # if not has_permission(['wrlman', 'tmadm'], user):
+        #     raise PermissionDenied
+        msg = request.session.pop('msg', '')
+        ok = False
+        tx = Transaction.objects.get(pk=txId)
+        msg = processVaultDeposit(tx)
+        tx.processed = True
+        tx.save()
+
+        return JsonResponse({
+            'ok': True,
+            'msg': msg,
+        })
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"ok":False, "msg":traceback.format_exc()})
 
 @login_required
 def testAutocomplete(request):
@@ -670,7 +691,6 @@ def nextUnprocessed(request, txId, direction):
         request.session['msg'] = f"No {direction}er unprocessed transactions"
     return redirect('viewTransaction', txId=tx.id)
 
-
 @login_required
 def salesReport(request):
     msg = request.session.pop('msg', '')
@@ -744,6 +764,31 @@ def tokensReport(request):
         "user": user,
         "message": msg,
         "data": tokens
+    })
+
+
+@login_required
+def vaultsReport(request):
+    msg = request.session.pop('msg', '')
+    user = request.user.cryptoTaxUser
+    vaults = Vault.objects.all().order_by('chain')
+    deposits = VaultDeposit.objects.filter(user=user, vault=OuterRef('pk')).values('vault')
+    deposits = deposits.annotate(deposits=Sum('amount')).order_by().values('deposits')
+    withdrawals = VaultWithdrawal.objects.filter(user=user, vault=OuterRef('pk')).values('vault')
+    withdrawals = withdrawals.annotate(withdrawals=Sum('amount')).order_by().values('withdrawals')
+    coin = VaultDeposit.objects.filter(user=user, vault=OuterRef('pk')).values('coin__symbol')
+    vaults = vaults.annotate(
+        deposits=Coalesce(Subquery(deposits), Decimal(0)), 
+        withdrawals=Coalesce(Subquery(withdrawals), Decimal(0)),
+        coin=Subquery(coin[:1]),
+    ).annotate(balance=F('deposits') - F('withdrawals'))
+    for v in vaults.values():
+        print(v)
+    return render(request, 'reports/vaults.html', {
+        "name":  user.name,
+        "user": user,
+        "message": msg,
+        "data": vaults,
     })
 
 @login_required

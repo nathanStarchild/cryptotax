@@ -1,0 +1,37 @@
+{% extends 'taxApp/basePage.html' %}
+{% block content %}
+    <div class="centeredGrid">
+        <div class="d-flex flex-column">
+            <h3 class="centeredGrid">Staking</h3>
+            <table class="table table-bordered table-hover table-responsive-md">
+                <thead class="thead-light">
+                    <tr id="tableHead">
+                        <th class="text-center align-middle">Id</th>
+                        <th class="text-center align-middle">Name</th>
+                        <th class="text-center align-middle">Address</th>
+                        <th class="text-center align-middle">Chain</th>
+                        <th class="text-center align-middle">Coin</th>
+                        <th class="text-center align-middle">Deposits</th>
+                        <th class="text-center align-middle">Withdrawals</th>
+                        <th class="text-center align-middle">Balance</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in data %}
+                        <tr>
+                            <td><a href="{% url 'viewTransaction' d.id %}">{{d.id}}</td>
+                            <td>{{d.name}}</td>
+                            <td><a href="{{d.explorerUrl}}">{{d.address}}</a></td>
+                            <td>{{d.chain.name}}</td>
+                            <td>{{d.coin}}</td>
+                            <td class="text-end">{{d.deposits|floatformat:"-4g"}}</td>
+                            <td class="text-end">{{d.withdrawals|floatformat:"-4g"}}</td>
+                            <td class="text-end">{{d.balance|floatformat:"-4g"}}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+{% endblock content %}

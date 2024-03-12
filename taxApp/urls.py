@@ -7,6 +7,7 @@ urlpatterns = [
     path('', views.index, name='index'),
     path('user/addresses', views.addresses, name='addresses'),
     path('ajax/user/addresses/new', views.ajaxNewAddress, name='ajaxNewAddress'),
+
     path('import/exchange', views.importExchangeTrades, name='importExchange'),
     path('import/transactions', views.importTransactions, name='importTransactions'),
     path('import/tokens', views.importTokens, name='importTokens'),
@@ -21,11 +22,14 @@ urlpatterns = [
     path('ajax/import/transactions/values', views.ajaxImportTxValues, name='ajaxImportTxValues'),
     path('ajax/import/transactions/fees/spends', views.ajaxTxFeeSpends, name='ajaxTxFeeSpends'),
     path('ajax/import/transactions/fees/poll', views.ajaxPollTxFees, name='ajaxPollTxFees'),
+
     path('ajax/process/transactions/approvals', views.ajaxProcessApprovals, name='ajaxProcessApprovals'),
     path('ajax/process/transactions/dexTrades', views.ajaxProcessDexTrades, name='ajaxProcessDexTrades'),
     path('ajax/process/transactions/dexTrades/oops', views.ajaxProcessDexOops, name='ajaxProcessDexOops'),
     path('ajax/process/transactions/depositsAndSends', views.ajaxProcessDepositsAndSends, name='ajaxProcessDepositsAndSends'),
     path('ajax/process/transactions/<txId>/bridgeSend', views.ajaxProcessBridgeSend, name='ajaxProcessBridgeSend'),
+    path('ajax/process/transactions/<txId>/vaultDeposit', views.ajaxProcessVaultDeposit, name='ajaxProcessVaultDeposit'),
+
     path('reports/buys', views.buysReport, name='buysReport'),
     path('reports/transactions', views.transactionsReport, name='transactionsReport'),
     path('reports/transactions/<txId>', views.viewTransaction, name='viewTransaction'),
@@ -34,6 +38,8 @@ urlpatterns = [
     path('reports/withdrawals', views.withdrawalsReport, name='withdrawalsReport'),
     path('reports/tokens', views.tokensReport, name='tokensReport'),
     path('reports/holdings', views.holdingsReport, name='holdingsReport'),
+    path('reports/vaults', views.vaultsReport, name='vaultsReport'),
+
     path('ajax/withdrawals/<wId>/received', views.ajaxAddWithdrawalReceived, name='ajaxAddWithdrawalReceived'),
     path('ajax/coins/search/', views.ajaxSearchCoins, name='ajaxSearchCoins'),
     
