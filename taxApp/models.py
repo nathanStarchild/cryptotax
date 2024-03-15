@@ -380,6 +380,7 @@ class Income(models.Model):
     note = models.CharField(max_length=128, blank=True, null=True)
     amount = models.DecimalField(max_digits=79, decimal_places=2, )
     costBasis = models.OneToOneField(CostBasis, on_delete=models.SET_NULL, blank=True, null=True)
+    transaction = models.ForeignKey(Transaction, on_delete=models.SET_NULL, blank=True, null=True)
 
     class Meta:
         managed = True
