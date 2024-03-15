@@ -29,6 +29,12 @@ urlpatterns = [
     path('ajax/process/transactions/depositsAndSends', views.ajaxProcessDepositsAndSends, name='ajaxProcessDepositsAndSends'),
     path('ajax/process/transactions/<txId>/bridgeSend', views.ajaxProcessBridgeSend, name='ajaxProcessBridgeSend'),
     path('ajax/process/transactions/<txId>/vaultDeposit', views.ajaxProcessVaultDeposit, name='ajaxProcessVaultDeposit'),
+    path('ajax/process/transactions/<txId>/vaultIncome', views.ajaxProcessVaultIncome, name='ajaxProcessVaultIncome'),
+    path('ajax/process/transactions/<txId>/vaultWithdrawal', views.ajaxProcessVaultWithdrawal, name='ajaxProcessVaultWithdrawal'),
+    path('ajax/process/transactions/<txId>/vaultRestake', views.ajaxProcessVaultRestake, name='ajaxProcessVaultRestake'),
+    path('ajax/process/transactions/<txId>/vaultMigrate', views.ajaxProcessVaultMigrate, name='ajaxProcessVaultMigrate'),
+    path('ajax/process/transactions/<txId>/vault/withdrawAndTrade', views.ajaxProcessVaultWithdrawAndTrade, name='ajaxProcessVaultWithdrawAndTrade'),
+    path('ajax/process/transactions/<txId>/asProcessed', views.ajaxMarkAsProcessed, name='ajaxMarkAsProcessed'),
 
     path('reports/buys', views.buysReport, name='buysReport'),
     path('reports/transactions', views.transactionsReport, name='transactionsReport'),

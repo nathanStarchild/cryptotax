@@ -687,21 +687,31 @@ def processBridgeSend(tx, web3=None, decodedLogs=None):
     print("TokenBridge created")
     return "processed as TokenBridge"
 
-def processVaultDeposit(tx, web3=None):
+def processVaultDeposit(tx, web3=None, amount=None, coin=None, address=None):
     if web3 is None:
         web3 = getWeb3(tx.chain)
-    vault, created = Vault.objects.get_or_create(chain=tx.chain, address=tx.toAddr.address)
+    if amount is None and coin is None:
+        outs = tx.tokentransfer_set.filter(fromAddr=tx.fromAddr)
+        assert outs.count() <= 1, f"hhhmmm, too many outgoing transfers {outs.values()}"
+        if not outs.exists():
+            amount = tx.value
+            coin = tx.feeCoin
+            assert amount > 0, f"No transfers out and no tx value? {tx.hash}"
+        else:
+            amount = outs[0].value
+            coin = outs[0].coin
+
+    if address is None:
+        address = tx.toAddr.address
+    # try:
+    #     Token.objects.get(address=address, chain=tx.chain)
+    #     print("yep")
+    #     address = outs[0].toAddr.address
+    # except Token.DoesNotExist:
+    #     pass
+    vault, created = Vault.objects.get_or_create(chain=tx.chain, address=address)
     if created:
         vault.name = getContractName(vault.address, tx.chain, web3)
-    outs = tx.tokentransfer_set.filter(fromAddr=tx.fromAddr)
-    assert outs.count() <= 1, f"hhhmmm, too many outgoing transfers {outs.values()}"
-    if not outs.exists():
-        amount = tx.value
-        coin = tx.feeCoin
-        assert amount > 0, f"No transfers out and no tx value? {tx.hash}"
-    else:
-        amount = outs[0].value
-        coin = outs[0].coin
 
     d = VaultDeposit(
         vault = vault,
@@ -718,7 +728,59 @@ def getVaultNames():
         v.name = getContractName(v.address, v.vaultdeposit_set.first().transaction.chain)
         v.save()
 
-def processVaultWithdrawal(tx, web3=None):
+def processVaultWithdrawal(tx, web3=None, amount=None, coin=None, address=None):
+    if web3 is None:
+        web3 = getWeb3(tx.chain)
+    if address is None:
+        address = tx.toAddr.address
+    if address == "0x88DCDC47D2f83a99CF0000FDF667A468bB958a78":
+        vault = Vault.objects.get(pk=6)
+    else:
+        vault = Vault.objects.get(chain=tx.chain, address=address)
+    
+    if amount is None and coin is None:
+        ins = tx.tokentransfer_set.filter(toAddr=tx.fromAddr)
+        assert ins.count() <= 1, f"hhhmmm, too many incoming transfers {ins.values()}"
+        if not ins.exists():
+            ins = tx.internaltransaction_set.filter(toAddr=tx.fromAddr)
+            assert ins.count() == 1, f"hhhmmm, too many incoming transfers {ins.values()}"
+
+        amount = ins[0].value
+        coin = ins[0].coin
+
+    balance = vault.getBalance()
+
+    income = max(amount - balance, Decimal(0))
+    withdrawn = amount - income
+
+    w = VaultWithdrawal(
+        vault = vault,
+        user = tx.fromAddr.user,
+        coin = coin,
+        amount = withdrawn,
+        transaction = tx
+    )
+    w.save()
+
+    msg = "Vault withdrawal saved successfully."
+
+    if income:
+        i = VaultIncome(
+            vault = vault,
+            user = tx.fromAddr.user,
+            coin = coin,
+            amount = income,
+            transaction = tx
+        )
+        i.save()
+        i.refresh_from_db()
+        i.createIncome()
+
+        msg += " Vault income saved Successfully"
+
+    return msg
+
+def processVaultIncome(tx, web3=None):
     if web3 is None:
         web3 = getWeb3(tx.chain)
     vault = Vault.objects.get(chain=tx.chain, address=tx.toAddr.address)
@@ -731,59 +793,102 @@ def processVaultWithdrawal(tx, web3=None):
     amount = ins[0].value
     coin = ins[0].coin
 
-    deposits = vault.vaultdeposit_set.all().aggregate(total=Coalesce(Sum('value'), Decimal(0)))['total']
-    withdrawals = vault.vaultwithdrawal_set.all().aggregate(total=Coalesce(Sum('value'), Decimal(0)))['total']
-    balance = deposits - withdrawals
-
-    income = amount - balance
-    withdrawn = amount - income
-
-    w = VaultWithdrawal(
+    i = VaultIncome(
         vault = vault,
         user = tx.fromAddr.user,
         coin = coin,
-        amount = withdrawn,
+        amount = amount,
         transaction = tx
     )
-    w.save()
+    i.save()
+    i.createIncome()
+    return "Income saved successfully"
 
-    price = getPrice(coin, tx.date)
-    incomeAUD = income * price - tx.feeAUD
+def processVaultRestake(tx, web3=None):
+    if web3 is None:
+        web3 = getWeb3(tx.chain)
+    vault = Vault.objects.get(chain=tx.chain, address=tx.toAddr.address)
+    ins = tx.tokentransfer_set.filter(toAddr=tx.fromAddr)
+    assert ins.count() <= 1, f"hhhmmm, too many incoming transfers {ins.values()}"
+    if not ins.exists():
+        ins = tx.internaltransaction_set.filter(toAddr=tx.fromAddr)
+        assert ins.count() == 1, f"hhhmmm, too many incoming transfers {ins.values()}"
 
-    i = Income(
-        coin = coin,
-        units = income,
-        unitPrice = price,
-        date = tx.date,
+    amount = ins[0].value
+    coin = ins[0].coin
+
+    i = VaultIncome(
+        vault = vault,
         user = tx.fromAddr.user,
-        note = f"income from {vault.name} - {vault.address}",
-        amount = incomeAUD,
+        coin = coin,
+        amount = amount,
+        transaction = tx
     )
     i.save()
-    i.refresh_from_db()
-    i.createCostBasis()
+    i.createIncome()
+    msg = "Income saved successfully."
+
+    d = VaultDeposit(
+        vault = vault,
+        user = tx.fromAddr.user,
+        coin = coin,
+        amount = amount,
+        transaction = tx
+    )
+    d.save()
+    msg += " Vault deposit saved successfully."
+    return msg
+
+# def migrateVault(tx, oldVault, newVault, web3=None):
+#     if web3 is None:
+#         web3 = getWeb3(tx.chain)
+#     balance = oldVault.getBalance()
+
+#     w = VaultWithdrawal(
+#         vault = oldVault,
+#         user = tx.fromAddr.user,
+#         coin = oldVault.vaultdeposit_set.first().coin,
+#         amount = balance,
+#         transaction = tx
+#     )
+#     w.save()
+
+#     d = VaultDeposit(
+#         vault = newVault,
+#         user = tx.fromAddr.user,
+#         coin = oldVault.vaultdeposit_set.first().coin,
+#         amount = balance,
+#         transaction = tx
+#     )
+#     d.save()
+
+#     return "vault migration processed"
 
 
-def processDexTrade(tx):
+    
+
+
+def processDexTrade(tx, bought=None, sold=None):
     print(tx.hash)
-    bought, sold = getTransfersInOut(tx)
-    if not sold:
-        print(f"nothing going out. Not a dex trade? {tx.hash}")
-    if not bought:
-        print(f"nothing coming in. Not a dex trade? {tx.hash}")
-        return
-    if len(sold)>1 or len(bought)>1:
-        print(f"too many tokens coming in or out: \nbought: {bought}\nsoud: {sold}\n{tx.hash}")
-        return
-    bought = bought[0]
-    sold = sold[0]
-    sold['priceAUD'] = getPrice(sold['coin'], tx.date)
-    try:
-        bought['priceAUD'] = sold['priceAUD'] * sold['amount'] / bought['amount']
-    except KeyError:
-        print(bought)
-        print(sold)
-        raise
+    if bought is None and sold is None:
+        bought, sold = getTransfersInOut(tx)
+        if not sold:
+            print(f"nothing going out. Not a dex trade? {tx.hash}")
+        if not bought:
+            print(f"nothing coming in. Not a dex trade? {tx.hash}")
+            return
+        if len(sold)>1 or len(bought)>1:
+            print(f"too many tokens coming in or out: \nbought: {bought}\nsoud: {sold}\n{tx.hash}")
+            return
+        bought = bought[0]
+        sold = sold[0]
+        sold['priceAUD'] = getPrice(sold['coin'], tx.date)
+        try:
+            bought['priceAUD'] = sold['priceAUD'] * sold['amount'] / bought['amount']
+        except KeyError:
+            print(bought)
+            print(sold)
+            raise
 
     b = Buy(
         coin=bought['coin'],

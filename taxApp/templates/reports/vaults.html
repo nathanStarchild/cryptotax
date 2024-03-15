@@ -14,6 +14,8 @@
                         <th class="text-center align-middle">Deposits</th>
                         <th class="text-center align-middle">Withdrawals</th>
                         <th class="text-center align-middle">Balance</th>
+                        <th class="text-center align-middle">Income</th>
+                        <th class="text-center align-middle">Income AUD</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -27,6 +29,8 @@
                             <td class="text-end">{{d.deposits|floatformat:"-4g"}}</td>
                             <td class="text-end">{{d.withdrawals|floatformat:"-4g"}}</td>
                             <td class="text-end">{{d.balance|floatformat:"-4g"}}</td>
+                            <td class="text-end">{{d.income|floatformat:"-4g"}}</td>
+                            <td class="text-end">${{d.incomeAUD|floatformat:"-2g"}}</td>
                         </tr>
                     {% endfor %}
                 </tbody>

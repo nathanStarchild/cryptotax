@@ -6,7 +6,7 @@ from gnosis.eth.django.models import EthereumAddressV2Field as AddressField, Uin
 from decimal import *
 import json
 import datetime
-from taxApp.utils import getPrice
+from zoneinfo import ZoneInfo
 
 ABIStorage = FileSystemStorage(location="assets/abis", base_url="/static/abis/")
 
@@ -134,7 +134,7 @@ class ExchangeWithdrawal(models.Model):
     unitsReceived = models.DecimalField(max_digits=79, decimal_places=18, blank=True, null=True)
     date = models.DateTimeField()
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    transaction = models.ForeignKey(Transaction, on_delete=models.CASCADE, blank=True, null=True)
+    transaction = models.ForeignKey(Transaction, on_delete=models.SET_NULL, blank=True, null=True)
     feeCoin = models.ForeignKey(Coin, on_delete=models.CASCADE, blank=True, null=True, related_name='withdrawal_fee')
     fee = models.DecimalField(max_digits=79, decimal_places=18, blank=True, null=True)
     feeAUD = models.DecimalField(max_digits=79, decimal_places=2, blank=True, null=True)
@@ -216,6 +216,21 @@ class Vault(models.Model):
 
     def explorerUrl(self):
         return f"https://{self.chain.explorer}/address/{self.address}"
+    
+    def getDeposits(self, date="now"):
+        if date == "now":
+            date = datetime.datetime.now().astimezone(ZoneInfo('UTC'))
+        deposits = self.vaultdeposit_set.filter(transaction__date__lt=date)
+        return deposits.aggregate(total=models.functions.Coalesce(models.Sum('amount'), Decimal(0)))['total']
+    
+    def getWithdrawals(self, date="now"):    
+        if date == "now":
+            date = datetime.datetime.now().astimezone(ZoneInfo('UTC'))
+        withdrawals = self.vaultwithdrawal_set.filter(transaction__date__lt=date)
+        return withdrawals.aggregate(total=models.functions.Coalesce(models.Sum('amount'), Decimal(0)))['total']
+    
+    def getBalance(self, date="now"):
+        return self.getDeposits(date) - self.getWithdrawals(date)
 
 class VaultDeposit(models.Model):
     vault = models.ForeignKey(Vault, on_delete=models.CASCADE)
@@ -243,12 +258,13 @@ class VaultIncome(models.Model):
     coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
     amount = models.DecimalField(max_digits=79, decimal_places=18)
     transaction = models.ForeignKey(Transaction, on_delete=models.CASCADE)
-    income = models.ForeignKey("Income", on_delete=models.SET_NULL, blank=True, null=True)
+    income = models.OneToOneField("Income", on_delete=models.SET_NULL, blank=True, null=True)
 
     class Meta:
         unique_together = ('vault', 'transaction')
 
     def createIncome(self):
+        from taxApp.utils import getPrice
         price = getPrice(self.coin, self.transaction.date)
         i = Income(
             coin = self.coin,
@@ -262,7 +278,7 @@ class VaultIncome(models.Model):
         i.save()
         self.income = i
         self.save()
-        i.createCostBasis()
+        i.createCostBasis(fee=self.transaction.feeAUD)
 
 class CostBasis(models.Model):
     coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
@@ -363,7 +379,7 @@ class Income(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     note = models.CharField(max_length=128, blank=True, null=True)
     amount = models.DecimalField(max_digits=79, decimal_places=2, )
-    costBasis = models.OneToOneField(CostBasis, on_delete=models.CASCADE, blank=True, null=True)
+    costBasis = models.OneToOneField(CostBasis, on_delete=models.SET_NULL, blank=True, null=True)
 
     class Meta:
         managed = True
@@ -381,11 +397,11 @@ class Income(models.Model):
             )
             h.save()
 
-    def createCostBasis(self):
+    def createCostBasis(self, fee=Decimal(0)):
         c = CostBasis(
             coin = self.coin,
             units = self.units,
-            unitPrice = self.unitPrice,
+            unitPrice = ((self.units * self.unitPrice) + fee) / self.units,
             date = self.date,
             user = self.user,
             remaining = self.units,
@@ -425,10 +441,10 @@ class CGTEvent(models.Model):
     unitPrice = models.DecimalField(max_digits=79, decimal_places=18, )
     date = models.DateTimeField()
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    costBasis = models.ForeignKey(CostBasis, on_delete=models.CASCADE)
+    costBasis = models.ForeignKey(CostBasis, on_delete=models.SET_NULL, blank=True, null=True)
     consumed = models.DecimalField(max_digits=79, decimal_places=18, )
-    sale = models.ForeignKey(Sale, on_delete=models.CASCADE, blank=True, null=True)
-    spend = models.ForeignKey(Spend, on_delete=models.CASCADE, blank=True, null=True)
+    sale = models.ForeignKey(Sale, on_delete=models.SET_NULL, blank=True, null=True)
+    spend = models.ForeignKey(Spend, on_delete=models.SET_NULL, blank=True, null=True)
     discounted = models.BooleanField()
     gain = models.DecimalField(max_digits=79, decimal_places=2, )
 

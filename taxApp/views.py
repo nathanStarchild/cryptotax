@@ -537,6 +537,165 @@ def ajaxProcessVaultDeposit(request, txId):
     except Exception as e:
         print(traceback.format_exc())
         return JsonResponse({"ok":False, "msg":traceback.format_exc()})
+    
+@login_required
+def ajaxProcessVaultIncome(request, txId):
+    try:
+        user = request.user.cryptoTaxUser
+        # if not has_permission(['wrlman', 'tmadm'], user):
+        #     raise PermissionDenied
+        msg = request.session.pop('msg', '')
+        ok = False
+        tx = Transaction.objects.get(pk=txId)
+        msg = processVaultIncome(tx)
+        tx.processed = True
+        tx.save()
+
+        return JsonResponse({
+            'ok': True,
+            'msg': msg,
+        })
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"ok":False, "msg":traceback.format_exc()})
+    
+@login_required
+def ajaxProcessVaultWithdrawal(request, txId):
+    try:
+        user = request.user.cryptoTaxUser
+        # if not has_permission(['wrlman', 'tmadm'], user):
+        #     raise PermissionDenied
+        msg = request.session.pop('msg', '')
+        ok = False
+        tx = Transaction.objects.get(pk=txId)
+        msg = processVaultWithdrawal(tx)
+        tx.processed = True
+        tx.save()
+
+        return JsonResponse({
+            'ok': True,
+            'msg': msg,
+        })
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"ok":False, "msg":traceback.format_exc()})
+    
+@login_required
+def ajaxProcessVaultRestake(request, txId):
+    try:
+        user = request.user.cryptoTaxUser
+        # if not has_permission(['wrlman', 'tmadm'], user):
+        #     raise PermissionDenied
+        msg = request.session.pop('msg', '')
+        ok = False
+        tx = Transaction.objects.get(pk=txId)
+        msg = processVaultRestake(tx)
+        tx.processed = True
+        tx.save()
+
+        return JsonResponse({
+            'ok': True,
+            'msg': msg,
+        })
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"ok":False, "msg":traceback.format_exc()})
+
+@login_required
+def ajaxProcessVaultMigrate(request, txId):
+    try:
+        assert request.method == "POST", "POST requests only"
+        user = request.user.cryptoTaxUser
+        # if not has_permission(['wrlman', 'tmadm'], user):
+        #     raise PermissionDenied
+        msg = request.session.pop('msg', '')
+        ok = False
+        tx = Transaction.objects.get(pk=txId)
+        web3 = getWeb3(tx.chain)
+        amount = request.POST['amount']
+        coin = Coin.objects.get(pk=request.POST['coin'])
+        if request.POST['denomination'] == "wei":
+            amount = web3.from_wei(int(amount), 'ether')
+        oldAddress = web3.to_checksum_address(request.POST['oldAddress'])
+        newAddress = web3.to_checksum_address(request.POST['newAddress'])
+        # msg = f"{coin.name}"
+        msg = processVaultWithdrawal(tx, amount=amount, coin=coin, address=oldAddress)
+        msg += processVaultDeposit(tx, amount=amount, coin=coin, address=newAddress)
+        tx.processed = True
+        tx.save()
+
+        return JsonResponse({
+            'ok': True,
+            'msg': msg,
+        })
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"ok":False, "msg":traceback.format_exc()})
+    
+@login_required
+def ajaxProcessVaultWithdrawAndTrade(request, txId):
+    try:
+        assert request.method == "POST", "POST requests only"
+        user = request.user.cryptoTaxUser
+        # if not has_permission(['wrlman', 'tmadm'], user):
+        #     raise PermissionDenied
+        msg = request.session.pop('msg', '')
+        ok = False
+        tx = Transaction.objects.get(pk=txId)
+        web3 = getWeb3(tx.chain)
+        withdrawAmount = Decimal(request.POST['withdrawAmount'])
+        if request.POST['withdrawDenomination'] == "wei":
+            withdrawAmount = web3.from_wei(withdrawAmount, 'ether')
+        withdrawCoin = Coin.objects.get(pk=request.POST['withdrawCoin'])
+        receiveAmount = Decimal(request.POST['receiveAmount'])
+        if request.POST['receiveDenomination'] == "wei":
+            receiveAmount = web3.from_wei(receiveAmount, 'ether')
+        receiveCoin = Coin.objects.get(pk=request.POST['receiveCoin'])
+        address = web3.to_checksum_address(request.POST['address'])
+        # msg = f"{coin.name}"
+        msg = processVaultWithdrawal(tx, amount=withdrawAmount, coin=withdrawCoin, address=address)
+        sold = {
+            'coin': withdrawCoin,
+            'amount': withdrawAmount,
+            'priceAUD': getPrice(withdrawCoin, tx.date)
+        }
+        bought = {
+            'coin': receiveCoin,
+            'amount': receiveAmount,
+            'priceAUD': sold['priceAUD'] * sold['amount'] / receiveAmount
+        }
+        msg += processDexTrade(tx, bought=bought, sold=sold)
+        tx.processed = True
+        tx.save()
+
+        return JsonResponse({
+            'ok': True,
+            'msg': msg,
+        })
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"ok":False, "msg":traceback.format_exc()})
+    
+@login_required
+def ajaxMarkAsProcessed(request, txId):
+    try:
+        user = request.user.cryptoTaxUser
+        # if not has_permission(['wrlman', 'tmadm'], user):
+        #     raise PermissionDenied
+        msg = request.session.pop('msg', '')
+        ok = False
+        tx = Transaction.objects.get(pk=txId)
+        tx.processed = True
+        tx.save()
+        msg = "Transaction marked as Processed"
+
+        return JsonResponse({
+            'ok': True,
+            'msg': msg,
+        })
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"ok":False, "msg":traceback.format_exc()})
 
 @login_required
 def testAutocomplete(request):
@@ -776,10 +935,15 @@ def vaultsReport(request):
     deposits = deposits.annotate(deposits=Sum('amount')).order_by().values('deposits')
     withdrawals = VaultWithdrawal.objects.filter(user=user, vault=OuterRef('pk')).values('vault')
     withdrawals = withdrawals.annotate(withdrawals=Sum('amount')).order_by().values('withdrawals')
+    incomes = VaultIncome.objects.filter(user=user, vault=OuterRef('pk')).values('vault')
+    income = incomes.annotate(units=Sum('amount')).order_by().values('units')
+    incomeAUD = incomes.annotate(AUD=Sum('income__amount')).order_by().values('AUD')
     coin = VaultDeposit.objects.filter(user=user, vault=OuterRef('pk')).values('coin__symbol')
     vaults = vaults.annotate(
         deposits=Coalesce(Subquery(deposits), Decimal(0)), 
         withdrawals=Coalesce(Subquery(withdrawals), Decimal(0)),
+        income=Coalesce(Subquery(income), Decimal(0)),
+        incomeAUD=Coalesce(Subquery(incomeAUD), Decimal(0)),
         coin=Subquery(coin[:1]),
     ).annotate(balance=F('deposits') - F('withdrawals'))
     for v in vaults.values():
