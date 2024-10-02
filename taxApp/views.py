@@ -7,10 +7,13 @@ from django.db.models.functions import Coalesce, Greatest, Least, Concat, Substr
 
 import threading
 import traceback
+from io import StringIO
 
 from .forms import *
 from taxApp.importScripts.exchangeTrades import *
 from taxApp.importScripts.onchainTransactions import *
+from taxApp.taxScripts.cgt import createCGTEntries, calculateCGT, rollbackCGT
+from taxApp.taxScripts.reporting import getData, totalHoldings
 from taxApp.utils import getPrice, savePrice
 
 # Create your views here.
@@ -103,6 +106,8 @@ def importExchangeTrades(request):
                 importBinanceAll(request.FILES['file'], user)
             elif source == "swyftx":
                 importSwyftx(request.FILES['file'], user)
+            elif source == "swyftxAUD":
+                importSwyftxAUD(request.FILES['file'], user)
     else:
         form = UploadExchangeForm()
     return render(request, 'import/exchange.html', {
@@ -863,6 +868,30 @@ def salesReport(request):
     })
 
 @login_required
+def spendsReport(request):
+    msg = request.session.pop('msg', '')
+    user = request.user.cryptoTaxUser
+    spends = Spend.objects.filter(user=user).order_by('-date')
+    return render(request, 'reports/spends.html', {
+        "name":  user.name,
+        "user": user,
+        "message": msg,
+        "data": spends
+    })
+
+@login_required
+def bridgesReport(request):
+    msg = request.session.pop('msg', '')
+    user = request.user.cryptoTaxUser
+    bridges = TokenBridge.objects.filter(user=user).order_by('-date')
+    return render(request, 'reports/bridges.html', {
+        "name":  user.name,
+        "user": user,
+        "message": msg,
+        "data": bridges
+    })
+
+@login_required
 def withdrawalsReport(request):
     msg = request.session.pop('msg', '')
     user = request.user.cryptoTaxUser
@@ -891,16 +920,7 @@ def ajaxAddWithdrawalReceived(request, wId):
             withdrawal.save()
             withdrawal.refresh_from_db()
             if not withdrawal.feeAUD:
-                fee = withdrawal.unitsSent - withdrawal.unitsReceived
-                feeCoin = withdrawal.coin
-                price = getPrice(feeCoin, withdrawal.date)
-                feeAUD = fee * price
-                withdrawal.fee = fee
-                withdrawal.feeCoin = feeCoin
-                withdrawal.feeAUD = feeAUD
-                withdrawal.save()
-                withdrawal.refresh_from_db()
-                withdrawal.createFeeSpend()
+                withdrawal.calculateFee()
             msg = "withdrawal details updated"
 
             return JsonResponse({
@@ -924,7 +944,6 @@ def tokensReport(request):
         "message": msg,
         "data": tokens
     })
-
 
 @login_required
 def vaultsReport(request):
@@ -953,6 +972,19 @@ def vaultsReport(request):
         "user": user,
         "message": msg,
         "data": vaults,
+    })
+
+
+@login_required
+def cgtReport(request):
+    msg = request.session.pop('msg', '')
+    user = request.user.cryptoTaxUser
+    data = CGTEvent.objects.filter(user=user).order_by('-date')
+    return render(request, 'reports/cgt.html', {
+        "name":  user.name,
+        "user": user,
+        "message": msg,
+        "data": data
     })
 
 @login_required
@@ -984,13 +1016,474 @@ def holdingsReport(request):
         data.append(dat)
     data.sort(key=lambda d: -d['value'])
     total = sum([d['value'] for d in data])
+
+    #calculate AUD spent
+    balanceAUD = ExchangeAUDTransaction.objects.filter(user=user).aggregate(t = Sum('amount'))['t']
+    depositsAUD = ExchangeAUDTransaction.objects.filter(
+        user=user,
+        note="Swyftx AUD deposit"
+    ).aggregate(t = Sum('amount'))['t']
+
+    spentAUD = depositsAUD - balanceAUD
+
     return render(request, 'reports/holdings.html', {
         "name":  user.name,
         "user": user,
         "message": msg,
         "data": data,
         "total": total,
+        'spentAUD': spentAUD,
     })
+
+
+@login_required
+def audReport(request):
+    msg = request.session.pop('msg', '')
+    user = request.user.cryptoTaxUser
+    data = ExchangeAUDTransaction.objects.filter(user=user).order_by('-date')
+    # print(buys.values())
+    return render(request, 'reports/aud.html', {
+        "name":  user.name,
+        "user": user,
+        "message": msg,
+        "data": data
+    })
+
+#Tax
+
+@login_required
+def taxProcessing(request):
+    msg = request.session.pop('msg', '')
+    user = request.user.cryptoTaxUser
+
+    return render(request, 'tax/processing.html', {
+        "name":  user.name,
+        "user": user,
+        "message": msg,
+    })
+
+@login_required
+def ajaxGetCGTEvents(request, year):
+    try:
+        user = request.user.cryptoTaxUser
+        # if not has_permission(['wrlman', 'tmadm'], user):
+        #     raise PermissionDenied
+        msg = request.session.pop('msg', '')
+        ok = False
+        year = int(year)
+        saved = createCGTEntries(year, user)
+        msg = f"{saved} new CGT events saved"
+
+        return JsonResponse({
+            'ok': ok,
+            'msg': msg,
+        })
+    except Exception as e:
+        print(traceback.format_exc())
+        print(e)
+        return JsonResponse({"ok":False, "msg":traceback.format_exc()})
+    
+@login_required
+def ajaxCalculateCGT(request, year):
+    try:
+        user = request.user.cryptoTaxUser
+        # if not has_permission(['wrlman', 'tmadm'], user):
+        #     raise PermissionDenied
+        msg = request.session.pop('msg', '')
+        ok = False
+        year = int(year)
+        rollbackCGT(year, user)
+        fifo = calculateCGT(year, user, "FIFO")
+        rollbackCGT(year, user)
+        lifo = calculateCGT(year, user, "LIFO")
+        rollbackCGT(year, user)
+        if (fifo < lifo):
+            cg = calculateCGT(year, user, "FIFO")
+            method = "FIFO"
+        else:
+            cg = calculateCGT(year, user, "LIFO")
+            method = "LIFO"
+
+        msg = f"Total capital gains: {cg} (LIFO: {lifo}, FIFO: {fifo}) "
+
+        return JsonResponse({
+            'ok': ok,
+            'msg': msg,
+        })
+    except Exception as e:
+        print(traceback.format_exc())
+        print(e)
+        return JsonResponse({"ok":False, "msg":traceback.format_exc()})
+
+@login_required
+def taxReportCsv(request, year):
+    msg = request.session.pop('msg', '')
+    user = request.user.cryptoTaxUser
+    #data: a list of dictionaries
+    #order: a list of strings (matching the keys of the dicts)
+    #filename: The name the file will be given (including extension)
+
+    #create a file-like buffer to store the file
+    buffer = StringIO()
+    # c = Coin.objects.get(symbol="eth") 
+    coins = Coin.objects.filter(buy__user=user).distinct().order_by('symbol')
+    for c in coins:
+        getData(c, int(year), user, buffer)
+    filename = f"SAI Crypto Tax FY {year}.csv"
+    response = HttpResponse(buffer.getvalue(), content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename={filename}'
+    buffer.close()
+    return response
+
+@login_required
+def financialYearSummary(request, year):
+    year = int(year)
+    msg = request.session.pop('msg', '')
+    user = request.user.cryptoTaxUser
+    startDate = datetime.datetime(year, 7, 1, tzinfo=ZoneInfo('Australia/Sydney'))
+    endDate = datetime.datetime(year+1, 6, 30)
+    endDate = datetime.datetime.combine(endDate, datetime.time.max, tzinfo=ZoneInfo('Australia/Sydney'))
+    earliestDate = Buy.objects.filter(user=user).order_by("date").first().date
+    prevYearsDate = [datetime.date(year-i, 6, 30) for i in [0, 1]]
+
+    #create a file-like buffer to store the file
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+    holdingsClosing, totalClosing = totalHoldings(endDate, user)
+    holdingsOpening, totalOpening = totalHoldings(startDate, user)
+
+    holdings = [{
+        "coin": d["coin"],
+        "openingBalance": 0,
+        "closingBalance": d["holding"],
+        "openingValue": 0,
+        "closingValue": d["value"],
+        }
+        for d in holdingsClosing
+    ]
+
+    for d in holdingsOpening:
+        for dd in holdings:
+            if d["coin"] == dd["coin"]:
+                dd["openingBalance"] = d["holding"]
+                dd["openingValue"] = d["value"]
+                break
+        else:
+            holdings.append({
+                "coin": d["coin"],
+                "openingBalance": d["holding"],
+                "closingBalance": 0,
+                "openingValue": d["value"],
+                "closingValue": 0,
+                })
+
+    audBalanceClosing = ExchangeAUDTransaction.objects.filter(
+        user = user,
+        date__lte = endDate,
+    ).aggregate(t = Sum('amount'))['t']
+
+    audBalanceOpening = ExchangeAUDTransaction.objects.filter(
+        user = user,
+        date__lte = startDate,
+    ).aggregate(t = Coalesce(Sum('amount'), Decimal(0.0)))['t']
+
+    writer.writerows([
+        ["Financial Year Summary"],
+        [f"{startDate.strftime('%d/%m/%Y')} - {endDate.strftime('%d/%m/%Y')}"],
+        [""],
+        ["Portfolio Valuation", "Opening", "Closing"],
+        ["Total Crypto Assets", f"{totalOpening:.2f}", f"{totalClosing:.2f}"],
+        ["Total AUD Balance", f"{audBalanceOpening:.2f}", f"{audBalanceClosing:.2f}"],
+        ["Total", f"{totalOpening + audBalanceOpening:.2f}", f"{totalClosing + audBalanceClosing:.2f}"],
+        [""],
+        [f"Allocation as at {endDate.strftime('%d/%m/%Y')}"],
+        ["Asset", "Opening Units", "Opening Value AUD", " Opening %", "Closing Units", "Closing Value AUD", " Closing %"]
+    ])
+    writer.writerows([
+        [
+            d['coin'].symbol, 
+            f"{d['openingBalance']:.4f}", 
+            f"{d['openingValue']:.2f}", 
+            f"{(100*d['openingValue']/totalOpening if totalOpening else 0):.2f}",
+            f"{d['closingBalance']:.4f}", 
+            f"{d['closingValue']:.2f}", 
+            f"{(100*d['closingValue']/totalClosing):.2f}",
+        ]
+        for d in holdings
+    ])
+
+    cgtTotal1yrPlus = 0
+    cgtTotal1yrMinus = 0
+    CGTevents = CGTEvent.objects.filter(user=user, date__gte=startDate, date__lte=endDate)
+    for evt in CGTevents:
+        for cb in evt.cgttocostbasis_set.all():
+            if cb.discounted:
+                cgtTotal1yrPlus += cb.gain
+            else:
+                cgtTotal1yrMinus += cb.gain
+    # totalCGL = CGTevents.aggregate(total=Sum("gain"))['total']
+    writer.writerows([
+        [""],
+        ["Total Capital Gains/Losses", f"{cgtTotal1yrPlus + cgtTotal1yrMinus:.2f}"],
+        ["Assets held more than 1 year", f"{cgtTotal1yrPlus:.2f}"],
+        ["Assets held less than 1 year", f"{cgtTotal1yrMinus:.2f}"],
+    ])
+
+    costs = CostBasis.objects.filter(user=user, date__lte=endDate)
+    totalCost = 0
+    #NOTE: This only works because we know CGT has only been calculated until the end date. This won't work if it's not the most recent 
+    costOfRemaining = 0
+    for cb in costs:
+        if cb.sourceString().startswith("Purchase"):
+            totalCost += cb.units * cb.unitPrice
+            costOfRemaining += cb.remaining * cb.unitPrice
+
+    proceeds = Sale.objects.filter(user=user, date__lte=endDate).aggregate(proceeds=Sum((F("units") * F("unitPrice")) - F("feeAUD")))['proceeds']
+
+
+
+    writer.writerows([
+        [""],
+        ['Cost and Proceeds'],
+        ['Total Cost of Purchases', f'{totalCost:.2f}'],
+        ['Total Proceeds of Sales', f'{proceeds:.2f}'],
+        [f"Cost of Cryptos held at {endDate.strftime('%d/%m/%Y')}", f'{costOfRemaining:.2f}']
+    ])
+
+
+    # r = ["Total Crypto Assets"]
+    # holdings, total = totalHoldings(endDate, user)
+    # r.append(f"${total:.2f}")
+    # writer.writerow(["Total Crypto Assets", f"${total:.2f}"])
+    # for d in prevYearsDate:
+    #     if d < earliestDate:
+    #         r.append("$0.00")
+    #     else:
+    #         _, t = totalHoldings(d, user)
+    #         r.append(f"${t:.2f}")
+
+    #Total income
+    income = Income.objects.filter(user=user, date__gte=startDate, date__lte=endDate).aggregate(t = Sum('amount'))['t']
+    writer.writerows([
+        [""],
+        ['Income'],
+        ['Total Income', f'{income:.2f}']
+    ])
+
+    #fees
+    swyftxBuys = Buy.objects.filter(user=user, date__gte=startDate, date__lte=endDate, note__startswith = "Swyftx")
+    binanceBuys = Buy.objects.filter(user=user, date__gte=startDate, date__lte=endDate, note__startswith = "Binance")
+    swyftxSales = Sale.objects.filter(user=user, date__gte=startDate, date__lte=endDate, note__startswith = "Swyftx")
+    binanceSales = Sale.objects.filter(user=user, date__gte=startDate, date__lte=endDate, note__startswith = "Binance")
+
+    swyftxSalesDistinct = []
+    binanceSalesDistinct = []
+
+    for s in swyftxSales:
+        if not swyftxBuys.filter(date=s.date).exists():
+            swyftxSalesDistinct.append(s.id)
+
+    for s in binanceSales:
+        if not binanceBuys.filter(date=s.date).exists():
+            binanceSalesDistinct.append(s.id)
+
+    swyftxSales = swyftxSales.filter(pk__in=swyftxSalesDistinct)
+    binanceSales = binanceSales.filter(pk__in=binanceSalesDistinct)
+
+    swyftxBuys = swyftxBuys.aggregate(t = Sum('feeAUD'))['t']
+    binanceBuys = binanceBuys.aggregate(t = Sum('feeAUD'))['t']
+    swyftxSales = swyftxSales.aggregate(t = Coalesce(Sum('feeAUD'), Decimal(0.0)))['t']
+    binanceSales = binanceSales.aggregate(t = Coalesce(Sum('feeAUD'), Decimal(0.0)))['t']
+
+    withdrawals = ExchangeWithdrawal.objects.filter(user=user, date__gte=startDate, date__lte=endDate)
+    withdrawals = withdrawals.aggregate(t = Sum('feeAUD'))['t']
+
+    transactionFees = Transaction.objects.filter(fromAddr__user=user, date__gte=startDate, date__lte=endDate)
+    transactionFees = transactionFees.aggregate(t = Sum('feeAUD'))['t']
+
+    writer.writerows([
+        [""],
+        ["Fees", f"{swyftxBuys + binanceBuys + swyftxSales + binanceSales + withdrawals + transactionFees:.2f}"],
+        ["Centralised Exchange Brokerage Fees", f"{swyftxBuys + binanceBuys + swyftxSales + binanceSales:.2f}"],
+        ["Centralised Exchange Withdrawal Fees", f"{withdrawals:.2f}"],
+        ["Onchain Transaction Fees", f"{transactionFees:.2f}"]
+    ])
+
+    audTransactions = ExchangeAUDTransaction.objects.filter(
+        user=user, 
+        date__gte=startDate, 
+        date__lte=endDate
+    )
+
+    audDeposits = audTransactions.filter(note__icontains="deposit").aggregate(t = Coalesce(Sum('amount'), Decimal(0.0)))['t']
+    audWithdrawals = audTransactions.filter(note__icontains="withdrawal").aggregate(t = Coalesce(Sum('amount'), Decimal(0.0)))['t']
+    audPurchases = audTransactions.filter(note__icontains="purchase").aggregate(t = Coalesce(Sum('amount'), Decimal(0.0)))['t']
+    audSales = audTransactions.filter(note__icontains="sell").aggregate(t = Coalesce(Sum('amount'), Decimal(0.0)))['t']
+
+    writer.writerows([
+        [""],
+        ["AUD Transactions"],
+        ["Deposits", f"{audDeposits:.2f}"],
+        ["Withdrawals", f"{audWithdrawals:.2f}"],
+        ["Crypto Purchases (incl Fees)", f"{audPurchases:.2f}"],
+        ["Crypto Sales (incl Fees)", f"{audSales:.2f}"],
+
+    ])
+
+    filename = f"SAI Financial Year Summary {year}.csv"
+    response = HttpResponse(buffer.getvalue(), content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename={filename}'
+    buffer.close()
+    return response
+
+
+@login_required
+def financialYearTotals(request, year):
+    year = int(year)
+    msg = request.session.pop('msg', '')
+    user = request.user.cryptoTaxUser
+    startDate = datetime.datetime(year, 7, 1, tzinfo=ZoneInfo('Australia/Sydney'))
+    endDate = datetime.datetime(year+1, 6, 30)
+    endDate = datetime.datetime.combine(endDate, datetime.time.max, tzinfo=ZoneInfo('Australia/Sydney'))
+    earliestDate = Buy.objects.filter(user=user).order_by("date").first().date
+    prevYearsDate = [datetime.date(year-i, 6, 30) for i in [0, 1]]
+
+    #create a file-like buffer to store the file
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+
+    audBalanceClosing = ExchangeAUDTransaction.objects.filter(
+        user = user,
+        date__lte = endDate,
+    ).aggregate(t = Sum('amount'))['t']
+
+    audBalanceOpening = ExchangeAUDTransaction.objects.filter(
+        user = user,
+        date__lte = startDate,
+    ).aggregate(t = Sum('amount'))['t']
+
+    writer.writerows([
+        ["Financial Year Summary"],
+        [f"{startDate.strftime('%d/%m/%Y')} - {endDate.strftime('%d/%m/%Y')}"],
+        [""],
+        # ["Portfolio Valuation"] + [f"value as at {d.strftime('%d/%m/%Y')}" for d in [endDate] + prevYearsDate],
+        # ["Total Crypto Assets", f"{total:.2f}"],
+        ["Opening AUD Balance", f"{audBalanceOpening:.2f}"],
+        ["Closing AUD Balance", f"{audBalanceClosing:.2f}"],
+        # ["Total", f"{total + audBalance:.2f}"],
+        [""],
+        # [f"Allocation as at {endDate.strftime('%d/%m/%Y')}"],
+        # ["Asset", "Value", "%"]
+    ])
+    # writer.writerows([
+    #     [d['coin'].symbol, f"{d['value']:.2f}", f"{(100*d['value']/total):.2f}"]
+    #     for d in holdings
+    # ])
+
+    cgtTotal1yrPlus = 0
+    cgtTotal1yrMinus = 0
+    CGTevents = CGTEvent.objects.filter(user=user, date__gte=startDate, date__lte=endDate)
+    for evt in CGTevents:
+        for cb in evt.cgttocostbasis_set.all():
+            if cb.discounted:
+                cgtTotal1yrPlus += cb.gain
+            else:
+                cgtTotal1yrMinus += cb.gain
+    # totalCGL = CGTevents.aggregate(total=Sum("gain"))['total']
+    writer.writerows([
+        [""],
+        ["Total Capital Gains/Losses", f"{cgtTotal1yrPlus + cgtTotal1yrMinus:.2f}"],
+        ["Assets held more than 1 year", f"{cgtTotal1yrPlus:.2f}"],
+        ["Assets held less than 1 year", f"{cgtTotal1yrMinus:.2f}"],
+    ])
+
+    # r = ["Total Crypto Assets"]
+    # holdings, total = totalHoldings(endDate, user)
+    # r.append(f"${total:.2f}")
+    # writer.writerow(["Total Crypto Assets", f"${total:.2f}"])
+    # for d in prevYearsDate:
+    #     if d < earliestDate:
+    #         r.append("$0.00")
+    #     else:
+    #         _, t = totalHoldings(d, user)
+    #         r.append(f"${t:.2f}")
+
+    #Total income
+    income = Income.objects.filter(user=user, date__gte=startDate, date__lte=endDate).aggregate(t = Sum('amount'))['t']
+    writer.writerows([
+        [""],
+        ['Income'],
+        ['Total Income', f'{income:.2f}']
+    ])
+
+    #fees
+    swyftxBuys = Buy.objects.filter(user=user, date__gte=startDate, date__lte=endDate, note__startswith = "Swyftx")
+    binanceBuys = Buy.objects.filter(user=user, date__gte=startDate, date__lte=endDate, note__startswith = "Binance")
+    swyftxSales = Sale.objects.filter(user=user, date__gte=startDate, date__lte=endDate, note__startswith = "Swyftx")
+    binanceSales = Sale.objects.filter(user=user, date__gte=startDate, date__lte=endDate, note__startswith = "Binance")
+
+    swyftxSalesDistinct = []
+    binanceSalesDistinct = []
+
+    for s in swyftxSales:
+        if not swyftxBuys.filter(date=s.date).exists():
+            swyftxSalesDistinct.append(s.id)
+
+    for s in binanceSales:
+        if not binanceBuys.filter(date=s.date).exists():
+            binanceSalesDistinct.append(s.id)
+
+    swyftxSales = swyftxSales.filter(pk__in=swyftxSalesDistinct)
+    binanceSales = binanceSales.filter(pk__in=binanceSalesDistinct)
+
+    swyftxBuys = swyftxBuys.aggregate(t = Sum('feeAUD'))['t']
+    binanceBuys = binanceBuys.aggregate(t = Sum('feeAUD'))['t']
+    swyftxSales = swyftxSales.aggregate(t = Coalesce(Sum('feeAUD'), Decimal(0.0)))['t']
+    binanceSales = binanceSales.aggregate(t = Coalesce(Sum('feeAUD'), Decimal(0.0)))['t']
+
+    withdrawals = ExchangeWithdrawal.objects.filter(user=user, date__gte=startDate, date__lte=endDate)
+    withdrawals = withdrawals.aggregate(t = Sum('feeAUD'))['t']
+
+    transactionFees = Transaction.objects.filter(fromAddr__user=user, date__gte=startDate, date__lte=endDate)
+    transactionFees = transactionFees.aggregate(t = Sum('feeAUD'))['t']
+
+    writer.writerows([
+        [""],
+        ["Fees", f"{swyftxBuys + binanceBuys + swyftxSales + binanceSales + withdrawals + transactionFees:.2f}"],
+        ["Centralised Exchange Brokerage Fees", f"{swyftxBuys + binanceBuys + swyftxSales + binanceSales:.2f}"],
+        ["Centralised Exchange Withdrawal Fees", f"{withdrawals:.2f}"],
+        ["Onchain Transaction Fees", f"{transactionFees:.2f}"]
+    ])
+
+    audTransactions = ExchangeAUDTransaction.objects.filter(
+        user=user, 
+        date__gte=startDate, 
+        date__lte=endDate
+    )
+
+    audDeposits = audTransactions.filter(note__icontains="deposit").aggregate(t = Coalesce(Sum('amount'), Decimal(0.0)))['t']
+    audWithdrawals = audTransactions.filter(note__icontains="withdrawal").aggregate(t = Coalesce(Sum('amount'), Decimal(0.0)))['t']
+    audPurchases = audTransactions.filter(note__icontains="purchase").aggregate(t = Coalesce(Sum('amount'), Decimal(0.0)))['t']
+    audSales = audTransactions.filter(note__icontains="sell").aggregate(t = Coalesce(Sum('amount'), Decimal(0.0)))['t']
+
+    writer.writerows([
+        [""],
+        ["AUD Transactions"],
+        ["Deposits", f"{audDeposits:.2f}"],
+        ["Withdrawals", f"{audWithdrawals:.2f}"],
+        ["Crypto Purchases (incl Fees)", f"{audPurchases:.2f}"],
+        ["Crypto Sales (incl Fees)", f"{audSales:.2f}"],
+
+    ])
+
+    filename = f"SAI Financial Year Summary {year}.csv"
+    response = HttpResponse(buffer.getvalue(), content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename={filename}'
+    buffer.close()
+    return response
+
+
+#Utils
 
 @login_required()
 def ajaxSearchCoins(request):

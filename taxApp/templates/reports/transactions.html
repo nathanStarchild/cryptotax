@@ -26,7 +26,7 @@
                             <td><a href="{{d.explorerUrl}}">{{d.hash}}</a></td>
                             <td class="text-end">{{d.fee|floatformat:"-4g"}} {{d.feeCoin.symbol}}</td>
                             <td class="text-end">${{d.feeAUD|floatformat:"-2"}}</td>
-                            <td>{% if d.processed %}<i class="fas fa-check"></i>{% endif %}
+                            <td>{% if d.processed %}<i class="fas fa-check"></i>{% endif %}</td>
                         </tr>
                     {% endfor %}
                 </tbody>

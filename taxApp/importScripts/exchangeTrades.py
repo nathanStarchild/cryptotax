@@ -4,7 +4,8 @@ import datetime
 import pytz
 from zoneinfo import ZoneInfo
 from taxApp.models import *
-from django.db import transaction
+from django.db import transaction, IntegrityError
+
 from decimal import *
 from pycoingecko import CoinGeckoAPI
 import re
@@ -143,7 +144,8 @@ def importBinanceTrades(file, user):
                     feeAUD = fee * c2AUD
                 else:
                     feeCoin =  Coin.objects.get(symbol__iexact=symbolFee)
-                    feeAUD = getPrice(feeCoin, date)
+                    feeCoinAUD = getPrice(feeCoin, date)
+                    feeAUD = fee * feeCoinAUD
 
                 if row["Side"] == "BUY":
                     buyCoin = c1
@@ -201,7 +203,8 @@ def importBinanceTrades(file, user):
                     feeAUD = fee * c2AUD
                 else:
                     feeCoin =  Coin.objects.get(symbol__iexact=symbolFee)
-                    feeAUD = getPrice(feeCoin, date)
+                    feeCoinAUD = getPrice(feeCoin, date)
+                    feeAUD = fee * feeCoinAUD
 
                 s = Sale(
                     coin=c2,
@@ -225,7 +228,8 @@ def importBinanceTrades(file, user):
                     feeAUD = fee * c1AUD
                 else:
                     feeCoin =  Coin.objects.get(symbol__iexact=symbolFee)
-                    feeAUD = getPrice(feeCoin, date)
+                    feeCoinAUD = getPrice(feeCoin, date)
+                    feeAUD = fee * feeCoinAUD
 
                 b = Buy(
                     coin=c1,
@@ -379,6 +383,71 @@ def importSwyftx(file, user):
                 )
                 w.save()
                 w.createFeeSpend()
+                w.processed = True
+                w.save()
                 print("withdrawal entered")
+
+
+def importSwyftxAUD(file, user):
+    ff = codecs.iterdecode(file, "utf-8-sig")
+    reader = csv.DictReader(ff)
+    # with transaction.atomic():
+    for row in reader:
+        date = datetime.datetime.strptime(
+            f"{row['Date']} {row['Time']}",
+            "%d/%m/%Y %H:%M:%S"
+        ).replace(tzinfo=ZoneInfo('Australia/Sydney'))
+
+        if row['Event'] == "deposit":
+            amount = row['Amount']
+        else:
+            assert False, 'not a deposit!'
+
+        refId = row["UUID"]
+
+        t = ExchangeAUDTransaction(
+            user = user,
+            date = date,
+            amount = amount,
+            note = "Swyftx AUD deposit",
+            refId = refId
+        )
+        try:
+            t.save()
+        except IntegrityError:
+            pass
+    swyftxAUDBuysAndSales(user)
+
+def swyftxAUDBuysAndSales(user):
+
+    buys = Buy.objects.filter(user=user, note__startswith = "Swyftx")
+    sales = Sale.objects.filter(user=user, note__startswith = "Swyftx")
+    # with transaction.atomic():
+    for buy in buys:
+        t = ExchangeAUDTransaction(
+            user = buy.user,
+            date = buy.date,
+            amount = -1 * (buy.units * buy.unitPrice + buy.feeAUD),
+            note = f"Swyftx purchase {buy.coin.symbol} with AUD",
+            refId = buy.refId
+        )
+        try:
+            t.save()
+        except IntegrityError:
+            pass
+
+    for sale in sales:
+        t = ExchangeAUDTransaction(
+            user = sale.user,
+            date = sale.date,
+            amount = sale.units * sale.unitPrice - sale.feeAUD,
+            note = f"Swyftx sell {sale.coin.symbol} for AUD",
+            refId = sale.refId
+        )
+        try:
+            t.save()
+        except IntegrityError:
+            pass
+
 
 

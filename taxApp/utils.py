@@ -23,7 +23,7 @@ def getPrice(coin, date):
     except HistoricalPrice.DoesNotExist:
         print("fetching")
         #to limit it to 30 calls/min
-        time.sleep(0.5)
+        # time.sleep(0.5)
         if now:
             res = cg.get_price(ids=coin.coingecko_id, vs_currencies='aud')
             price = Decimal(res[coin.coingecko_id]['aud'])

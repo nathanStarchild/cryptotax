@@ -2,6 +2,7 @@ from taxApp.models import *
 from taxApp.utils import getPrice, savePrice
 
 from web3 import Web3
+from web3.middleware import geth_poa_middleware
 from web3.exceptions import ABIFunctionNotFound, ContractLogicError
 from eth_utils import event_abi_to_log_topic
 import os
@@ -27,6 +28,8 @@ def getWeb3(chain):
     api_key = os.environ.get(f"APIKEY_{chain.symbol}")
     url = f"{chain.endpoint}{api_key}"
     web3 = Web3(Web3.HTTPProvider(url))
+    if chain.name == "Polygon POS":
+        web3.middleware_onion.inject(geth_poa_middleware, layer=0)
     return web3
 
 def tryMultipleKeys(myDict, keysToCheck):
@@ -42,48 +45,67 @@ def tryMultipleKeys(myDict, keysToCheck):
 def saveTxHashes(address, chain):
     api_key = os.environ.get(f"APIKEY_{chain.symbol}")
     url = f"{chain.endpoint}{api_key}"
-    payload = {
-        "id": 1,
-        "jsonrpc": "2.0",
-        "method": "alchemy_getAssetTransfers",
-        "params": [
-            {
-                "fromBlock": "0x0",
-                "toBlock": "latest",
-                "fromAddress": address.address,
-                # "category": ["external", "internal", "erc20", "erc721", "erc1155"],
-                "category": ["external"],
-                "withMetadata": True,
-                "excludeZeroValue": False,
-                #"maxCount": "0x3e8"
-            }
-        ]
-    }
-    headers = {
-        "accept": "application/json",
-        "content-type": "application/json"
-    }
-
-    response = requests.post(url, json=payload, headers=headers)
-
-    dat = json.loads(response.text)
-    txs = dat['result']['transfers']
-    # print(txs[0])
-    fmt = "%Y-%m-%dT%H:%M:%S.%f%z"
+    web3 = getWeb3(chain)
+    pageKey = None
     saved = 0
-    for tx in txs:
-        date = datetime.datetime.strptime(tx['metadata']['blockTimestamp'], fmt)
-        t = Transaction(
-            fromAddr = address,
-            chain = chain,
-            hash = tx['hash'],
-            date=date.astimezone(ZoneInfo('UTC')),
-        )
+    while (True):
+        payload = {
+            "id": 1,
+            "jsonrpc": "2.0",
+            "method": "alchemy_getAssetTransfers",
+            "params": [
+                {
+                    "fromBlock": "0x0",
+                    "toBlock": "latest",
+                    "fromAddress": address.address,
+                    # "category": ["external", "internal", "erc20", "erc721", "erc1155"],
+                    "category": ["external"],
+                    "withMetadata": True,
+                    "excludeZeroValue": False,
+                    #"maxCount": "0x3e8"
+                }
+            ]
+        }
+
+        if pageKey:
+            payload["params"]["pageKey"] = pageKey
+
+        headers = {
+            "accept": "application/json",
+            "content-type": "application/json"
+        }
+
+        response = requests.post(url, json=payload, headers=headers)
+
+        dat = json.loads(response.text)
+        txs = dat['result']['transfers']
         try:
-            t.save()
-            saved += 1
-        except Exception as e:
-            print(str(e))
+            pageKey = dat['result']['pageKey']
+        except KeyError:
+            pass
+        # print(txs[0])
+        fmt = "%Y-%m-%dT%H:%M:%S.%f%z"
+        for tx in txs:
+            # t = saveTx(tx['hash'], chain, web3)
+            # saveTxFee(t)
+            # saveTxFeeSpend(t)
+            date = datetime.datetime.strptime(tx['metadata']['blockTimestamp'], fmt)
+            # fromAddr, _ = Address.objects.get_or_create(address=address)
+            toAddr, _ = Address.objects.get_or_create(address=web3.to_checksum_address(tx['to']))
+            try:
+                t, created = Transaction.objects.get_or_create(
+                    fromAddr = address,
+                    toAddr = toAddr,
+                    chain = chain,
+                    hash = tx['hash'],
+                    date=date.replace(tzinfo=ZoneInfo('UTC')),
+                )
+                # t.save()
+                saved += 1
+            except Exception as e:
+                print(str(e))
+        if not pageKey:
+            break
 
     return saved
 
@@ -137,16 +159,19 @@ def saveIncomingTxs(toAddress, chain):
             print('no To address')
             continue
         # continue
-        txTo = web3.to_checksum_address(tx['to'])
-        try:
-            fromAddr = Address.objects.get(address=tx['from'])
-        except Address.DoesNotExist:
-            fromAddr = Address(address=tx['from'], user=noUser)
-            fromAddr.save()
+        # txTo = web3.to_checksum_address(tx['to'])
+
+        toAddr, _ = Address.objects.get_or_create(address=web3.to_checksum_address(tx['to']))
+        fromAddr, _ = Address.objects.get_or_create(address=web3.to_checksum_address(tx['from']))
+        # try:
+        #     fromAddr = Address.objects.get(address=tx['from'])
+        # except Address.DoesNotExist:
+        #     fromAddr = Address(address=tx['from'])
+        #     fromAddr.save()
 
         t = Transaction(
             fromAddr = fromAddr,
-            to = txTo,
+            toAddr = toAddr,
             chain = chain,
             hash = web3.to_hex(tx['hash']),
             date=date.astimezone(ZoneInfo('UTC')),
@@ -158,6 +183,7 @@ def saveIncomingTxs(toAddress, chain):
             saved += 1
         except Exception as e:
             print(traceback.format_exc())
+            print(tx['hash'])
             # raise
 
     return saved
@@ -165,13 +191,18 @@ def saveIncomingTxs(toAddress, chain):
 def saveTx(hash, chain, web3=None):
     if web3 is None:
         web3 = getWeb3(chain)
+    try:
+        t = Transaction.objects.get(hash=hash, chain=chain)
+        return t
+    except:
+        pass
     tx = web3.eth.get_transaction(hash)
     timestamp = web3.eth.get_block(tx.blockHash).timestamp
     d = datetime.datetime.fromtimestamp(timestamp).astimezone(ZoneInfo('UTC'))
     fromAddr, _ = Address.objects.get_or_create(address=tx['from'])
-    toAddr, _ = Address.objects.get_or_create(address=tx['from'])
+    toAddr, _ = Address.objects.get_or_create(address=tx['to'])
 
-    t = Transaction(
+    t, created = Transaction.objects.get_or_create(
         fromAddr = fromAddr,
         toAddr = toAddr,
         chain = chain,
@@ -322,7 +353,7 @@ def saveIncomingTokenTransfers(toAddress, chain):
             ttx.save()
             saved += 1
         except Exception as e:
-            # print(str(e))
+            print(str(e))
             pass
 
     return saved
@@ -497,6 +528,8 @@ def getTxReceipt(tx):
     return dat
 
 def saveTxFee(tx):
+    if tx.fee is not None:
+        return
     dat = getTxReceipt(tx)
     # print(dat)
     gasUsed = Decimal(int(dat['result']['gasUsed'], 16))
@@ -1238,3 +1271,64 @@ def getTxRecipt(tx):
     web3 = getWeb3(tx.chain)
     # receipt = getTxReceipt(tx)
     return web3.eth.get_transaction_receipt(tx.hash)
+
+
+def checkITXDates():
+    for chain in Chain.objects.all():
+        web3 = getWeb3(chain)
+        for itx in TokenTransfer.objects.filter(transaction__chain=chain):
+            tx = itx.transaction
+            txInfo = web3.eth.get_transaction(tx.hash)
+            timestamp = web3.eth.get_block(txInfo.blockHash).timestamp
+            dReal = datetime.datetime.fromtimestamp(timestamp).replace(tzinfo=ZoneInfo('UTC'))
+            if not dReal == tx.date:
+                print(dReal - tx.date)
+            else:
+                print("ok")
+
+
+def checkTxDates():
+    for chain in Chain.objects.all():
+        web3 = getWeb3(chain)
+        wrong = 0
+        nope = 0
+        for tx in Transaction.objects.filter(chain=chain, fromAddr__user__isnull=False)[:1]:
+            try:
+                txInfo = web3.eth.get_transaction(tx.hash)
+                timestamp = web3.eth.get_block(txInfo.blockHash).timestamp
+            except:
+                nope += 1
+                raise
+            dReal = datetime.datetime.fromtimestamp(timestamp, tz=ZoneInfo('UTC'))
+            if not dReal == tx.date:
+                # print(dReal - tx.date)
+                # print(tx.explorerUrl())
+                print(tx.date)
+                print(dReal)
+                print(tx.hash)
+                print(timestamp)
+                wrong += 1
+            else:
+                print("ok")
+        print(f"{wrong} wrong dates")
+        print(f"{nope} nopes")
+
+def theBigDateFix():
+    #search all transactions, check the date. If it's wrong, fix the date. then
+    #find all associated entries with a date:
+    # - Buy, Sale, Income, Spend
+    # -- 
+
+    #or just delete everything and do it again from scratch?
+    # will deleting the user delete everything?
+    # Pretty sure that yes.
+    # Dump the db
+    # delete the stardust user
+    # recreate it
+    # import all the exchange data
+    # Import the transactions
+    # import the internalTransactions
+    # import TokenTransfers
+    # get transaction fees
+    # create fee spends
+    pass

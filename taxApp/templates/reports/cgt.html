@@ -1,0 +1,59 @@
+{% extends 'taxApp/basePage.html' %}
+{% block content %}
+    <div class="centeredGrid">
+        <div class="d-flex flex-column">
+            <h3 class="centeredGrid">CGT Events</h3>
+            <table class="table table-bordered table-hover table-responsive-md">
+                <thead class="thead-light">
+                    <tr id="tableHead">
+                        <th rowspan="2" class="text-center align-middle">Date</th>
+                        <th rowspan="2" class="text-center align-middle">Coin</th>
+                        <th rowspan="2" class="text-center align-middle">Units</th>
+                        <th rowspan="2" class="text-center align-middle">Price</th>
+                        <th rowspan="2" class="text-center align-middle">Source</th>
+                        <th colspan="6" class="text-center align-middle">Cost Basis</th>
+                    </tr>
+                    <tr>
+                        <th class="text-center align-middle">ID</th>
+                        <th class="text-center align-middle">Date</th>
+                        <th class="text-center align-middle">Price</th>
+                        <th class="text-center align-middle">Consumed</th>
+                        <th class="text-center align-middle">Discounted</th>
+                        <th class="text-center align-middle">Total Gain</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in data %}
+                        <tr class="top-border table-light">
+                            <td>{{d.date|date:'d/m/Y'}}</td>
+                            <td>{{d.coin.symbol}}</td>
+                            <td class="text-end">{{d.units|floatformat:"-4g"}}</td>
+                            <td class="text-end">${{d.unitPrice|floatformat:"-4g"}}</td>
+                            <td>
+                                {% if d.sale %}
+                                    sale {{d.sale.id}}
+                                {% elif d.spend %}
+                                    spend {{d.spend.id}}
+                                {% endif %}
+                            </td>
+                            <td colspan="5"></td>
+                            <th class="text-end">${{d.gain|floatformat:"-2g"}}</th>
+                        </tr>
+                        {% for cb in d.cgttocostbasis_set.all %}
+                            <tr>
+                                <td colspan="5"></td>
+                                <td>{{cb.costBasis.id}}</td>
+                                <td>{{cb.costBasis.date|date:'d/m/Y'}}</td>
+                                <td class="text-end">${{cb.costBasis.unitPrice|floatformat:"-4g"}}</td>
+                                <td class="text-end">{{cb.consumed|floatformat:"-4g"}}</td>
+                                <td>{{cb.discounted}}</td>
+                                <td class="text-end">${{cb.gain|floatformat:"-2g"}}</td>
+                            </tr>
+                        {% endfor %}
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+{% endblock content %}

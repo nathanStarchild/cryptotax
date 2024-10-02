@@ -15,6 +15,7 @@ class UploadExchangeForm(forms.Form):
         ("binanceTrades", "Binance Trades"),
         ("binanceAll", "Binance All"),
         ("swyftx", "swyftx"),
+        ("swyftxAUD", "swyftx AUD transactions"),
     ]
     file = forms.FileField(label="CSV file")
     source = forms.ChoiceField(widget=forms.Select(attrs={'class': 'form-select'}), choices=CHOICES, label="Source")

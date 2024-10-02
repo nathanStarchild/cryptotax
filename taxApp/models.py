@@ -50,6 +50,35 @@ class Coin(models.Model):
         managed = True
         db_table = 'coins'
 
+    def getBalance(self, user, date="now"):
+        if date == "now":
+            date = datetime.datetime.now().astimezone(ZoneInfo('UTC'))
+        bought = self.buy_set.filter(user=user, date__lte=date).aggregate(
+            val=models.functions.Coalesce(
+                models.Sum('units'),
+                Decimal(0)
+            )
+        )['val']
+        income = self.income_set.filter(user=user, date__lte=date).aggregate(
+            val=models.functions.Coalesce(
+                models.Sum('units'),
+                Decimal(0)
+            )
+        )['val']
+        sold = self.sale_set.filter(user=user, date__lte=date).aggregate(
+            val=models.functions.Coalesce(
+                models.Sum('units'),
+                Decimal(0)
+            )
+        )['val']
+        spent = self.spend_set.filter(user=user, date__lte=date).aggregate(
+            val=models.functions.Coalesce(
+                models.Sum('units'),
+                Decimal(0)
+            )
+        )['val']
+        return bought + income - sold - spent
+
 class Chain(models.Model):
     name = models.CharField(max_length=20)
     symbol = models.CharField(max_length=20)
@@ -102,7 +131,7 @@ class Transaction(models.Model):
                 units = self.fee,
                 unitPrice = self.feeAUD / self.fee,
                 date = self.date,
-                user = self.address.user,
+                user = self.fromAddr.user,
                 note = f"transaction {self.id}",
                 description = f"transaction fee tx {self.hash}"
             )
@@ -141,6 +170,7 @@ class ExchangeWithdrawal(models.Model):
     refId = models.CharField(max_length=120, blank=True, null=True)
     note = models.CharField(max_length=120, blank=True, null=True)
     txId = models.CharField(max_length=66, blank=True, null=True)
+    processed = models.BooleanField(default=False)
 
     def createFeeSpend(self):
         if self.fee and self.feeCoin and self.feeAUD:
@@ -154,6 +184,24 @@ class ExchangeWithdrawal(models.Model):
                 description = "withdrawal fee"
             )
             s.save()
+
+    def calculateFee(self):
+        from taxApp.utils import getPrice
+        if self.unitsSent and self.unitsReceived and not self.feeAUD:
+            self.fee = self.unitsSent - self.unitsReceived
+            price = getPrice(self.feeCoin, self.date)
+            self.feeAUD = self.fee * price
+            self.save()
+            self.createFeeSpend()
+            self.processed = True
+            self.save()
+
+class ExchangeAUDTransaction(models.Model):
+    date = models.DateTimeField()
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    amount = models.DecimalField(max_digits=79, decimal_places=2, )
+    note = models.CharField(max_length=120, blank=True, null=True)
+    refId = models.CharField(max_length=120, blank=True, null=True, unique=True)
 
 class TokenBridge(models.Model):
     coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
@@ -169,6 +217,18 @@ class TokenBridge(models.Model):
     refId = models.CharField(max_length=120, blank=True, null=True)
     note = models.CharField(max_length=120, blank=True, null=True)
     txId = models.CharField(max_length=66, blank=True, null=True)
+    processed = models.BooleanField(default=False)
+
+    def calculateFee(self):
+        from taxApp.utils import getPrice
+        if self.unitsSent and self.unitsReceived and not self.feeAUD:
+            self.fee = self.unitsSent - self.unitsReceived
+            price = getPrice(self.feeCoin, self.date)
+            self.feeAUD = self.fee * price
+            self.save()
+            self.createFeeSpend()
+            self.processed = True
+            self.save()
 
     def createFeeSpend(self):
         if self.fee and self.feeCoin and self.feeAUD:
@@ -292,6 +352,18 @@ class CostBasis(models.Model):
         managed = True
         db_table = 'costbases'
 
+    def source(self):
+        try:
+            return self.buy
+        except Buy.DoesNotExist:
+            return self.income
+        
+    def sourceString(self):
+        try:
+            return f"Purchase {self.buy.id}"
+        except Buy.DoesNotExist:
+            return f"Income {self.income.id}"
+
 class Buy(models.Model):
     coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
     units = models.DecimalField(max_digits=79, decimal_places=18, )
@@ -334,6 +406,23 @@ class Buy(models.Model):
             )
             h.save()
 
+    def fixFee(self):
+        if not self.feeCoin:
+            return
+        from taxApp.utils import getPrice
+        feePrice = getPrice(self.feeCoin, self.date)
+        feeAUD = feePrice * self.fee
+        if abs(feeAUD - self.feeAUD) > Decimal(0.01):
+            print(f'fixing {self.note} - {self.fee} {self.feeCoin.name} AUD${self.feeAUD} new fee AUD${feeAUD}')
+            self.feeAUD = feeAUD
+            self.save()
+            self.refresh_from_db()
+            self.costBasis.delete()
+            self.createCostBasis()
+
+    def total(self):
+        return (self.units * self.unitPrice) + self.feeAUD
+
 class Sale(models.Model):
     coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
     units = models.DecimalField(max_digits=79, decimal_places=18, )
@@ -350,6 +439,9 @@ class Sale(models.Model):
         managed = True
         db_table = 'sales'
 
+    def total(self):
+        return (self.units * self.unitPrice) - self.feeAUD
+
     def savePrice(self):
         try:
             HistoricalPrice.objects.get(coin=self.coin, date=self.date)
@@ -361,6 +453,17 @@ class Sale(models.Model):
                 price=self.unitPrice
             )
             h.save()
+
+    def fixFee(self):
+        if not self.feeCoin:
+            return
+        from taxApp.utils import getPrice
+        feePrice = getPrice(self.feeCoin, self.date)
+        feeAUD = feePrice * self.fee
+        if abs(feeAUD - self.feeAUD) > Decimal(0.01):
+            print(f'fixing {self.note} - {self.fee} {self.feeCoin.name} AUD${self.feeAUD} new fee AUD${feeAUD}')
+            self.feeAUD = feeAUD
+            self.save()
 
 class Swap(models.Model):
     buy = models.OneToOneField(Buy, on_delete=models.CASCADE)
@@ -436,18 +539,34 @@ class Spend(models.Model):
             )
             h.save()
 
+    def total(self):
+        return self.units * self.unitPrice
+
 class CGTEvent(models.Model):
     coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
     units = models.DecimalField(max_digits=79, decimal_places=18, )
     unitPrice = models.DecimalField(max_digits=79, decimal_places=18, )
     date = models.DateTimeField()
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    costBasis = models.ForeignKey(CostBasis, on_delete=models.SET_NULL, blank=True, null=True)
-    consumed = models.DecimalField(max_digits=79, decimal_places=18, )
-    sale = models.ForeignKey(Sale, on_delete=models.SET_NULL, blank=True, null=True)
-    spend = models.ForeignKey(Spend, on_delete=models.SET_NULL, blank=True, null=True)
+    costBasis = models.ManyToManyField(CostBasis, blank=True, through="CGTtoCostBasis")
+    sale = models.OneToOneField(Sale, on_delete=models.SET_NULL, blank=True, null=True)
+    spend = models.OneToOneField(Spend, on_delete=models.SET_NULL, blank=True, null=True)
+    gain = models.DecimalField(max_digits=79, decimal_places=2, blank=True, null=True)
+    method = models.CharField(max_length=4, blank=True, null=True)
+
+    def sourceString(self):
+        if self.sale:
+            return f"Sale {self.sale.id}"
+        elif self.spend:
+            return f"Disposal {self.spend.id}"
+        return "No source recorded!"
+
+class CGTtoCostBasis(models.Model):
+    cgtEvent = models.ForeignKey(CGTEvent, on_delete=models.CASCADE)
+    costBasis = models.ForeignKey(CostBasis, on_delete=models.CASCADE)
+    consumed = models.DecimalField(max_digits=79, decimal_places=18)
     discounted = models.BooleanField()
-    gain = models.DecimalField(max_digits=79, decimal_places=2, )
+    gain = models.DecimalField(max_digits=79, decimal_places=2)
 
 class HistoricalPrice(models.Model):
     coin =  models.ForeignKey(Coin, on_delete=models.CASCADE)

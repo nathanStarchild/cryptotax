@@ -31,6 +31,7 @@ urlpatterns = [
     path('ajax/process/transactions/<txId>/vaultDeposit', views.ajaxProcessVaultDeposit, name='ajaxProcessVaultDeposit'),
     path('ajax/process/transactions/<txId>/vaultIncome', views.ajaxProcessVaultIncome, name='ajaxProcessVaultIncome'),
     path('ajax/process/transactions/<txId>/vaultWithdrawal', views.ajaxProcessVaultWithdrawal, name='ajaxProcessVaultWithdrawal'),
+    path('ajax/withdrawals/<wId>/received', views.ajaxAddWithdrawalReceived, name='ajaxAddWithdrawalReceived'),
     path('ajax/process/transactions/<txId>/vaultRestake', views.ajaxProcessVaultRestake, name='ajaxProcessVaultRestake'),
     path('ajax/process/transactions/<txId>/vaultMigrate', views.ajaxProcessVaultMigrate, name='ajaxProcessVaultMigrate'),
     path('ajax/process/transactions/<txId>/vault/withdrawAndTrade', views.ajaxProcessVaultWithdrawAndTrade, name='ajaxProcessVaultWithdrawAndTrade'),
@@ -41,12 +42,21 @@ urlpatterns = [
     path('reports/transactions/<txId>', views.viewTransaction, name='viewTransaction'),
     path('reports/transactions/<txId>/nextUnprocessed/<direction>', views.nextUnprocessed, name='nextUnprocessed'),
     path('reports/sales', views.salesReport, name='salesReport'),
+    path('reports/spends', views.spendsReport, name='spendsReport'),
+    path('reports/bridges', views.bridgesReport, name='bridgesReport'),
     path('reports/withdrawals', views.withdrawalsReport, name='withdrawalsReport'),
     path('reports/tokens', views.tokensReport, name='tokensReport'),
     path('reports/holdings', views.holdingsReport, name='holdingsReport'),
     path('reports/vaults', views.vaultsReport, name='vaultsReport'),
+    path('reports/cgt', views.cgtReport, name='cgtReport'),
+    path('reports/aud', views.audReport, name='audReport'),
 
-    path('ajax/withdrawals/<wId>/received', views.ajaxAddWithdrawalReceived, name='ajaxAddWithdrawalReceived'),
+    path('tax/processing', views.taxProcessing, name='taxProcessing'),
+    path('ajax/tax/processing/getCGTEvents/<year>/', views.ajaxGetCGTEvents, name='ajaxGetCGTEvents'),
+    path('ajax/tax/processing/calcCGT/<year>/', views.ajaxCalculateCGT, name='ajaxCalculateCGT'),
+    path('tax/getCSV/<year>/', views.taxReportCsv, name='taxReportCsv'),
+    path('tax/getFYReportCSV/<year>/', views.financialYearSummary, name='FYReportCsv'),
+
     path('ajax/coins/search/', views.ajaxSearchCoins, name='ajaxSearchCoins'),
     
 ] #+ static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

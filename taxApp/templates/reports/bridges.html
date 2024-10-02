@@ -3,7 +3,7 @@
 {% block content %}
     <div class="centeredGrid">
         <div class="d-flex flex-column">
-            <h3 class="centeredGrid">withdrawals</h3>
+            <h3 class="centeredGrid">Bridging</h3>
             <table class="table table-bordered table-hover table-responsive-md">
                 <thead class="thead-light">
                     <tr id="tableHead">
@@ -16,7 +16,8 @@
                         <th class="text-center align-middle">Note</th>
                         <th class="text-center align-middle">Reference ID</th>
                         <th class="text-center align-middle">txID</th>
-                        <th class="text-center align-middle">transaction</th>
+                        <th class="text-center align-middle">Send transaction</th>
+                        <th class="text-center align-middle">Receive transaction</th>
                         <th class="text-center align-middle">Processed</th>
                     </tr>
                 </thead>
@@ -27,25 +28,25 @@
                             <td>{{d.coin.symbol}}</td>
                             <td class="text-end">{{d.unitsSent|floatformat:"-4g"}}</td>
                             <td class="text-end">
-                                {% if not d.unitsReceived %}
+                                {% comment %} {% if not d.unitsReceived %}
                                     <input type="text" name="received" class="form-control receivedInput" data-url="{% url "ajaxAddWithdrawalReceived" d.id %}">
-                                {% else %}
+                                {% else %} {% endcomment %}
                                     {{d.unitsReceived|floatformat:"-4g"}}
-                                {% endif %}
+                                {% comment %} {% endif %} {% endcomment %}
                             </td>
                             <td class="text-end">{{d.fee|floatformat:"-4g"}} {{d.coin.symbol}}</td>
                             <td class="text-end">${{d.feeAUD|floatformat:"-2"}}</td>
                             <td>{{d.note}}</td>
                             <td>{{d.refId}}</td>
+                            <td>{{d.txId}}</td>
                             <td>
-                                {% if d.txId %}
-                                    {{d.txId|truncateHash}}
+                                {% if d.transactionSend %}
+                                    <a href="{{d.transactionSend.explorerUrl}}">{{d.transactionSend.hash|truncateHash}}</a>
                                 {% endif %}
-
                             </td>
                             <td>
-                                {% if d.transaction %}
-                                    <a href="{{d.transaction.explorerUrl}}">{{d.transaction.hash|truncateHash}}</a>
+                                {% if d.transactionReceive %}
+                                    <a href="{{d.transactionReceive.explorerUrl}}">{{d.transactionReceive.hash|truncateHash}}</a>
                                 {% endif %}
                             </td>
                             <td>{% if d.processed %}<i class="fas fa-check"></i>{% endif %}</td>

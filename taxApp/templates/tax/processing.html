@@ -1,0 +1,49 @@
+{% extends 'taxApp/basePage.html' %}
+{% block content %}
+<div class="centeredGrid">
+    <div class="d-flex flex-column">
+        <h3 class="centeredGrid">Processing for Tax Calculation</h3>
+        <div class="d-flex flex-row justify-content-center">
+            <label>Tax Year
+                <input type="number" id="yearInput" class="form-control">
+            </label>
+        </div>
+        <div class="d-flex flex-row justify-content-center">
+            <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxGetCGTEvents' '!year' %}" disabled>Get CGT Events</button>
+            <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxCalculateCGT' '!year' %}" disabled>Calculate CGT</button>
+            <a class="btn btn-primary m-1 downloadLink" href="{% url 'taxReportCsv' '!year' %}">download tax report</a>
+            <a class="btn btn-primary m-1 downloadLink" href="{% url 'FYReportCsv' '!year' %}">download FY report</a>
+        </div>
+    </div>
+</div>
+{% endblock content %}
+
+{% block inlineJS %}
+    <script>
+        $(document).ready(function(){
+            let year
+
+            $("#yearInput").on("input", $.debounce(function() {
+                year = $("#yearInput").val()
+                $(".processBtn").prop('disabled', false)
+                $(".downloadLink").each(function() {
+                    let url = $(this).attr('href').replace('!year', `${year}`)
+                    $(this).attr('href', url)
+                })
+            }, 1000))
+
+            $(".processBtn").click(async function() {
+                $("#message").slideUp();
+                let url = $(this).data('url').replace('!year', `${year}`)
+                let resp = await fetch(url)
+                let res = await resp.json()
+
+                if (res.msg){
+                    $("#messageContent").text(res.msg);
+                    $("#message").slideDown();
+                }
+            })
+        });
+    </script>
+{% endblock inlineJS %}
+

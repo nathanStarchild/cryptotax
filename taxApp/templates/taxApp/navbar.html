@@ -34,13 +34,25 @@
                             <i class="fas fa-file-alt" aria-hidden="true"></i> Reports <span class="caret"></span>
                         </a>
                         <ul class="dropdown-menu" aria-labelledby="ReportsDropdown">
+                            <li><a class="dropdown-item" href="{% url 'holdingsReport' %}">Holdings</a></li>
                             <li><a class="dropdown-item" href="{% url 'buysReport' %}">Purchases</a></li>
                             <li><a class="dropdown-item" href="{% url 'salesReport' %}">Sales</a></li>
+                            <li><a class="dropdown-item" href="{% url 'spendsReport' %}">Spends</a></li>
                             <li><a class="dropdown-item" href="{% url 'transactionsReport' %}">Transactions</a></li>
+                            <li><a class="dropdown-item" href="{% url 'bridgesReport' %}">Bridging</a></li>
                             <li><a class="dropdown-item" href="{% url 'withdrawalsReport' %}">Exchange Withdrawals</a></li>
                             <li><a class="dropdown-item" href="{% url 'tokensReport' %}">Tokens</a></li>
                             <li><a class="dropdown-item" href="{% url 'vaultsReport' %}">Staking</a></li>
-                            <li><a class="dropdown-item" href="{% url 'holdingsReport' %}">Holdings</a></li>
+                            <li><a class="dropdown-item" href="{% url 'cgtReport' %}">CGT Events</a></li>
+                            <li><a class="dropdown-item" href="{% url 'audReport' %}">AUD Transactions</a></li>
+                        </ul>
+                    </li>
+                    <li class="nav-item dropdown pad-left">
+                        <a class="nav-link dropdown-toggle" href="#" id="TaxDropdown" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+                            <i class="fas fa-file-alt" aria-hidden="true"></i> Tax <span class="caret"></span>
+                        </a>
+                        <ul class="dropdown-menu" aria-labelledby="TaxDropdown">
+                            <li><a class="dropdown-item" href="{% url 'taxProcessing' %}">Preprocessing</a></li>
                         </ul>
                     </li>
                 {% else %}:
