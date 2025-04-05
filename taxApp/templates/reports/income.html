@@ -1,0 +1,37 @@
+{% extends 'taxApp/basePage.html' %}
+{% block content %}
+    <div class="centeredGrid">
+        <div class="d-flex flex-column">
+            <h3 class="centeredGrid">Income</h3>
+            <table class="table table-bordered table-hover table-responsive-md">
+                <thead class="thead-light">
+                    <tr id="tableHead">
+                        <th class="text-center align-middle">Date</th>
+                        <th class="text-center align-middle">Coin</th>
+                        <th class="text-center align-middle">Units</th>
+                        <th class="text-center align-middle">Price</th>
+                        <th class="text-center align-middle">Fee</th>
+                        <th class="text-center align-middle">Net Income</th>
+                        <th class="text-center align-middle">Note</th>
+                        <th class="text-center align-middle">Transaction</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for d in data %}
+                        <tr>
+                            <td>{{d.date|date:'d/m/Y'}}</td>
+                            <td>{{d.coin.symbol}}</td>
+                            <td class="text-end">{{d.units|floatformat:"-4g"}}</td>
+                            <td class="text-end">${{d.unitPrice|floatformat:"-4g"}}</td>
+                            <td class="text-end">${{d.transaction.feeAUD|floatformat:"-2"}}</td>
+                            <td class="text-end">${{d.amount|floatformat:"-4g"}}</td>
+                            <td>{{d.note}}</td>
+                            <td><a href="{% url 'viewTransaction' d.transaction.id %}">{{d.transaction.id}}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+{% endblock content %}
