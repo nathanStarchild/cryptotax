@@ -152,6 +152,7 @@ class TokenTransfer(models.Model):
     fromAddr = models.ForeignKey(Address, on_delete=models.CASCADE, related_name="tokenTransferFrom")
     toAddr = models.ForeignKey(Address, on_delete=models.CASCADE, related_name="tokenTransferTo")
     coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
+    token = models.ForeignKey(Token, on_delete=models.CASCADE, blank=True, null=True)
     value = models.DecimalField(max_digits=79, decimal_places=18)
 
     class Meta:
@@ -163,7 +164,8 @@ class ExchangeWithdrawal(models.Model):
     unitsReceived = models.DecimalField(max_digits=79, decimal_places=18, blank=True, null=True)
     date = models.DateTimeField()
     user = models.ForeignKey(User, on_delete=models.CASCADE)
-    transaction = models.ForeignKey(Transaction, on_delete=models.SET_NULL, blank=True, null=True)
+    transactionSend = models.ForeignKey(Transaction, on_delete=models.SET_NULL, blank=True, null=True, related_name='withdrawal_send')
+    transactionReceive = models.ForeignKey(Transaction, on_delete=models.SET_NULL, blank=True, null=True, related_name='withdrawal_receive')
     feeCoin = models.ForeignKey(Coin, on_delete=models.CASCADE, blank=True, null=True, related_name='withdrawal_fee')
     fee = models.DecimalField(max_digits=79, decimal_places=18, blank=True, null=True)
     feeAUD = models.DecimalField(max_digits=79, decimal_places=2, blank=True, null=True)
@@ -195,6 +197,37 @@ class ExchangeWithdrawal(models.Model):
             self.createFeeSpend()
             self.processed = True
             self.save()
+
+    def tryToFindReceiveTransaction(self):
+        #TODO: convert to use db instead
+        from taxApp.importScripts.onchainTransactions import getTransfersInOut
+        timeTo = self.date + datetime.timedelta(hours=1)
+        timeFrom = self.date - datetime.timedelta(minutes=20)
+        print()
+        print(self.id)
+        print(timeFrom)
+        print(timeTo)
+        txs = Transaction.objects.filter(
+            date__range=(timeFrom, timeTo)
+        ).order_by('date')
+        print(f"{self.coin.name} {self.coin}")
+        print(txs.values('toAddr'))
+        print(self.user.address_set.all())
+        print(f"found {txs.count()} txs: {txs.values('id')}")
+        for tx in txs:
+            print(tx)
+            incoming, _ = getTransfersInOut(tx, addresses = self.user.address_set.all())
+            print(incoming)
+            if incoming:
+                for inc in incoming:
+                    print(f"{inc['coin'].name} {inc['coin']}")
+                    if inc['coin'] == self.coin:
+                        self.unitsReceived = inc['amount']
+                        self.transactionReceive = tx
+                        print(f"found transfer in. sent: {self.unitsSent}, received:{self.unitsReceived}")
+                        # print(f"tx send: {self.transactionSend.hash} receive: {self.transactionReceive.hash}")
+                        self.save()
+                        return
 
 class ExchangeAUDTransaction(models.Model):
     date = models.DateTimeField()
@@ -242,22 +275,34 @@ class TokenBridge(models.Model):
                 description = "Bridging fee"
             )
             s.save()
+        elif self.feeAUD == Decimal(0):
+            print("fee is 0")
         else:
             raise ValueError('fee is unkown, cannot create Spend')
 
     def tryToFindReceiveTransaction(self):
+        #TODO: convert to use db instead
         from taxApp.importScripts.onchainTransactions import getTransfersInOut
         timeTo = self.date + datetime.timedelta(hours=1)
-        print(self.date)
-        print(timeTo)
+        # print(self.date)
+        # print(timeTo)
         txs = Transaction.objects.filter(
-            date__range=(self.date, timeTo)
+            date__gt=self.date,
+            date__lte=timeTo,
         ).order_by('date')
-        print(txs.values('to'))
+        # print()
+        # print(self.id)
+        # print(f"{self.coin.name} {self.coin}")
+        # print(txs.values('toAddr'))
+        # print(self.user.address_set.all())
+        # print(f"found {txs.count()} txs: {txs.values('id')}")
         for tx in txs:
-            incoming, _ = getTransfersInOut(tx, addresses=[a.address for a in self.user.address_set.all()])
+            # print(tx)
+            incoming, _ = getTransfersInOut(tx, addresses = self.user.address_set.all())
+            # print(incoming)
             if incoming:
                 for inc in incoming:
+                    # print(f"{inc['coin'].name} {inc['coin']}")
                     if inc['coin'] == self.coin:
                         self.unitsReceived = inc['amount']
                         self.transactionReceive = tx
@@ -333,7 +378,8 @@ class VaultIncome(models.Model):
             date = self.transaction.date,
             user = self.user,
             note = f"Income from {self.vault.name}",
-            amount = self.amount * price,
+            amount = (self.amount * price) - self.transaction.feeAUD,
+            transaction = self.transaction,
         )
         i.save()
         self.income = i
@@ -561,12 +607,28 @@ class CGTEvent(models.Model):
             return f"Disposal {self.spend.id}"
         return "No source recorded!"
 
+class CapitalGain(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    year = models.IntegerField()
+    gain = models.DecimalField(max_digits=79, decimal_places=2)
+    remaining = models.DecimalField(max_digits=79, decimal_places=2, default=Decimal(0))
+
+    class Meta:
+        unique_together = ('user', 'year')
+
 class CGTtoCostBasis(models.Model):
     cgtEvent = models.ForeignKey(CGTEvent, on_delete=models.CASCADE)
     costBasis = models.ForeignKey(CostBasis, on_delete=models.CASCADE)
-    consumed = models.DecimalField(max_digits=79, decimal_places=18)
-    discounted = models.BooleanField()
-    gain = models.DecimalField(max_digits=79, decimal_places=2)
+    consumed = models.DecimalField(max_digits=79, decimal_places=18) #CGTEvent.units
+    grossGain = models.DecimalField(max_digits=79, decimal_places=2)
+    netGain = models.DecimalField(max_digits=79, decimal_places=2, blank=True, null=True)
+    priorLossesApplied = models.ManyToManyField(CapitalGain, through='PriorLossConsumption')
+    discountable = models.BooleanField()
+
+class PriorLossConsumption(models.Model):
+    cgtToCostBasis = models.ForeignKey(CGTtoCostBasis, on_delete=models.CASCADE)
+    capitalGain = models.ForeignKey(CapitalGain, on_delete=models.CASCADE)
+    consumed = models.DecimalField(max_digits=79, decimal_places=2)
 
 class HistoricalPrice(models.Model):
     coin =  models.ForeignKey(Coin, on_delete=models.CASCADE)

@@ -7,6 +7,7 @@
             <table class="table table-bordered table-hover table-responsive-md">
                 <thead class="thead-light">
                     <tr id="tableHead">
+                        <th class="text-center align-middle">ID</th>
                         <th class="text-center align-middle">Date</th>
                         <th class="text-center align-middle">Coin</th>
                         <th class="text-center align-middle">Units Sent</th>
@@ -23,6 +24,7 @@
                 <tbody>
                     {% for d in data %}
                         <tr>
+                            <td>{{d.id}}</td>
                             <td>{{d.date|date:'d/m/Y'}}</td>
                             <td>{{d.coin.symbol}}</td>
                             <td class="text-end">{{d.unitsSent|floatformat:"-4g"}}</td>
@@ -44,8 +46,8 @@
 
                             </td>
                             <td>
-                                {% if d.transaction %}
-                                    <a href="{{d.transaction.explorerUrl}}">{{d.transaction.hash|truncateHash}}</a>
+                                {% if d.transactionSend %}
+                                    <a href="{{d.transactionSend.explorerUrl}}">{{d.transactionSend.hash|truncateHash}}</a>
                                 {% endif %}
                             </td>
                             <td>{% if d.processed %}<i class="fas fa-check"></i>{% endif %}</td>

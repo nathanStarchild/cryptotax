@@ -5,6 +5,7 @@ from web3 import Web3
 from web3.middleware import geth_poa_middleware
 from web3.exceptions import ABIFunctionNotFound, ContractLogicError
 from eth_utils import event_abi_to_log_topic
+from pycoingecko import CoinGeckoAPI
 import os
 import subprocess
 import requests
@@ -24,11 +25,14 @@ from django.db.models.functions import Coalesce
 
 SessionStore = import_module(settings.SESSION_ENGINE).SessionStore
 
+
+cg = CoinGeckoAPI(api_key=os.environ.get('COINGECKO_APIKEY'))
+
 def getWeb3(chain):
-    api_key = os.environ.get(f"APIKEY_{chain.symbol}")
+    api_key = os.environ.get(f"ALCHEMY_APIKEY")
     url = f"{chain.endpoint}{api_key}"
     web3 = Web3(Web3.HTTPProvider(url))
-    if chain.name == "Polygon POS":
+    if chain.name in ["Polygon POS", "Optimism"]:
         web3.middleware_onion.inject(geth_poa_middleware, layer=0)
     return web3
 
@@ -43,7 +47,7 @@ def tryMultipleKeys(myDict, keysToCheck):
     return val
 
 def saveTxHashes(address, chain):
-    api_key = os.environ.get(f"APIKEY_{chain.symbol}")
+    api_key = os.environ.get(f"ALCHEMY_APIKEY")
     url = f"{chain.endpoint}{api_key}"
     web3 = getWeb3(chain)
     pageKey = None
@@ -91,7 +95,12 @@ def saveTxHashes(address, chain):
             # saveTxFeeSpend(t)
             date = datetime.datetime.strptime(tx['metadata']['blockTimestamp'], fmt)
             # fromAddr, _ = Address.objects.get_or_create(address=address)
-            toAddr, _ = Address.objects.get_or_create(address=web3.to_checksum_address(tx['to']))
+            try:
+                toAddr, _ = Address.objects.get_or_create(address=web3.to_checksum_address(tx['to']))
+            except Address.MultipleObjectsReturned:
+                print("multiple objects returned")
+                print(Address.objects.filter(address=web3.to_checksum_address(tx['to'])).values())
+                raise
             try:
                 t, created = Transaction.objects.get_or_create(
                     fromAddr = address,
@@ -111,7 +120,7 @@ def saveTxHashes(address, chain):
 
 def saveIncomingTxs(toAddress, chain):
     web3 = getWeb3(chain)
-    api_key = os.environ.get(f"APIKEY_{chain.symbol}")
+    api_key = os.environ.get(f"ALCHEMY_APIKEY")
     url = f"{chain.endpoint}{api_key}"
     payload = {
         "id": 1,
@@ -122,7 +131,8 @@ def saveIncomingTxs(toAddress, chain):
                 "fromBlock": "0x0",
                 "toBlock": "latest",
                 "toAddress": toAddress.address,
-                "category": ["external", "internal", "erc20", "erc721", "erc1155"],
+                "category": ["external"],
+                # "category": ["external", "internal", "erc20", "erc721", "erc1155"],
                 # "category": ["external"],
                 "withMetadata": True,
                 "excludeZeroValue": False,
@@ -145,6 +155,9 @@ def saveIncomingTxs(toAddress, chain):
     saved = 0
     noUser = User.objects.get(name="noUser")
     for tx in txs:
+        # print(tx['hash'])
+        # print(type(tx['hash']))
+        # print(web3.to_hex(tx['hash']))
         try:
             t = Transaction.objects.get(chain=chain, hash=tx['hash'])
             print('already exists')
@@ -168,14 +181,19 @@ def saveIncomingTxs(toAddress, chain):
         # except Address.DoesNotExist:
         #     fromAddr = Address(address=tx['from'])
         #     fromAddr.save()
+        # try:
+        #     h = web3.to_hex(tx['hash'])
+        # except:
+        #     print(tx['hash'])
+        #     raise
 
         t = Transaction(
             fromAddr = fromAddr,
             toAddr = toAddr,
             chain = chain,
-            hash = web3.to_hex(tx['hash']),
+            hash = tx['hash'],
             date=date.astimezone(ZoneInfo('UTC')),
-            value=web3.from_wei(tx['value'], 'ether'),
+            value=tx['value'],
             feeCoin=chain.feeCoin,
         )
         try:
@@ -219,7 +237,7 @@ def saveTx(hash, chain, web3=None):
 
 def saveIncomingInternalTxs(toAddress, chain):
     web3 = getWeb3(chain)
-    api_key = os.environ.get(f"APIKEY_{chain.symbol}")
+    api_key = os.environ.get(f"ALCHEMY_APIKEY")
     url = f"{chain.endpoint}{api_key}"
     payload = {
         "id": 1,
@@ -246,7 +264,15 @@ def saveIncomingInternalTxs(toAddress, chain):
     response = requests.post(url, json=payload, headers=headers)
 
     dat = json.loads(response.text)
-    txs = dat['result']['transfers']
+    fromExplorer = False
+    try:
+        txs = dat['result']['transfers']
+    except KeyError:
+        try: 
+            txs = getInternalsFromExplorer(toAddress, chain)['result']
+            fromExplorer = True
+        except KeyError:
+            return 0
     saved = 0
     for tx in txs:
         try:
@@ -258,15 +284,28 @@ def saveIncomingInternalTxs(toAddress, chain):
         txFromAddr, _ = Address.objects.get_or_create(address=tx['from'])
         txToAddr, _ = Address.objects.get_or_create(address=tx['to'])
         coin = chain.feeCoin
-        assert coin.symbol.lower() == tx['asset'].lower(), 'unexpected internal transfer asset'
-
-        itx = InternalTransaction(
-            transaction = t,
-            fromAddr = txFromAddr,
-            toAddr = txToAddr,
-            coin = coin,
-            value = tx['value'],
-        )
+        # token = coin.token_set.filter(chain = chain).first()
+        # assert coin.symbol.lower() == tx['asset'].lower(), 'unexpected internal transfer asset'
+        value = tx['value']
+        if fromExplorer:
+            value = Web3.from_wei(int(value), 'ether')
+        try:
+            itx = InternalTransaction.objects.get(
+                transaction = t,
+                fromAddr = txFromAddr,
+                toAddr = txToAddr,
+                coin = coin,
+            )
+            itx.value = value
+        except InternalTransaction.DoesNotExist:
+            itx = InternalTransaction(
+                transaction = t,
+                fromAddr = txFromAddr,
+                toAddr = txToAddr,
+                coin = coin,
+                # token = token,
+                value = value,
+            )
         try:
             itx.save()
             saved += 1
@@ -275,9 +314,52 @@ def saveIncomingInternalTxs(toAddress, chain):
 
     return saved
 
+def tryInternalsByHash(txHash, chain):
+    queryString = f"?module=account&action=txlistinternal&txhash={txHash}"
+    if not chain.name == "ZKsync Era":
+        api_key = os.environ.get(f"EXPLORER_APIKEY_{chain.symbol}")
+        queryString += f"&apikey={api_key}"
+    if chain.name == "ZKsync Era":
+        url = f"https://block-explorer-api.mainnet.zksync.io/api{queryString}"
+    else:
+        if chain.name == "Optimism":
+            url = f"https://api-{chain.explorer}/api{queryString}"
+        else:
+            url = f"https://api.{chain.explorer}/api{queryString}"
+
+    response = requests.get(url)
+    dat = json.loads(response.text)
+    # for k in dat['result']:
+    #     print(k['to'])
+    #     print(k)
+    return dat
+
+
+def getInternalsFromExplorer(address, chain):
+    queryString = f"?module=account&action=txlistinternal&address={address.address}&startblock=0&endblock=99999999&page=1&offset=99"
+    if not chain.name == "ZKsync Era":
+        api_key = os.environ.get(f"EXPLORER_APIKEY_{chain.symbol}")
+        queryString += f"&apikey={api_key}"
+    if chain.name == "ZKsync Era":
+        url = f"https://block-explorer-api.mainnet.zksync.io/api{queryString}"
+    else:
+        if chain.name == "Optimism":
+            url = f"https://api-{chain.explorer}/api{queryString}"
+        else:
+            url = f"https://api.{chain.explorer}/api{queryString}"
+
+    response = requests.get(url)
+    dat = json.loads(response.text)
+    # for k in dat['result']:
+    #     # print(k['to'])
+    #     print(k)
+    #     print()
+    return dat
+
+
 def saveIncomingTokenTransfers(toAddress, chain):
     web3 = getWeb3(chain)
-    api_key = os.environ.get(f"APIKEY_{chain.symbol}")
+    api_key = os.environ.get(f"ALCHEMY_APIKEY")
     url = f"{chain.endpoint}{api_key}"
     payload = {
         "id": 1,
@@ -304,7 +386,10 @@ def saveIncomingTokenTransfers(toAddress, chain):
     response = requests.post(url, json=payload, headers=headers)
 
     dat = json.loads(response.text)
-    txs = dat['result']['transfers']
+    try:
+        txs = dat['result']['transfers']
+    except KeyError:
+        return 0
     saved = 0
     for tx in txs:
         if not tx['to']:
@@ -330,8 +415,8 @@ def saveIncomingTokenTransfers(toAddress, chain):
                     transaction = t,
                     fromAddr = txFromAddr,
                     toAddr = txToAddr,
-                    coin = token.coin,
                     value = Decimal(0),
+                    token = token,
                 )
                 ttx.value = val
                 ttx.save()
@@ -342,16 +427,17 @@ def saveIncomingTokenTransfers(toAddress, chain):
         else:
             val = tx['value']
 
-        ttx = TokenTransfer(
-            transaction = t,
-            fromAddr = txFromAddr,
-            toAddr = txToAddr,
-            coin = token.coin,
-            value = val,
-        )
         try:
-            ttx.save()
-            saved += 1
+            ttx, created = TokenTransfer.objects.get_or_create(
+                transaction = t,
+                fromAddr = txFromAddr,
+                toAddr = txToAddr,
+                coin = token.coin,
+                value = val,
+                token = token,
+            )
+            if created: 
+                saved += 1
         except Exception as e:
             print(str(e))
             pass
@@ -360,7 +446,7 @@ def saveIncomingTokenTransfers(toAddress, chain):
 
 def saveOutgoingTokenTransfers(fromAddress, chain):
     web3 = getWeb3(chain)
-    api_key = os.environ.get(f"APIKEY_{chain.symbol}")
+    api_key = os.environ.get(f"ALCHEMY_APIKEY")
     url = f"{chain.endpoint}{api_key}"
     payload = {
         "id": 1,
@@ -387,7 +473,11 @@ def saveOutgoingTokenTransfers(fromAddress, chain):
     response = requests.post(url, json=payload, headers=headers)
 
     dat = json.loads(response.text)
-    txs = dat['result']['transfers']
+    # print(dat)
+    try:
+        txs = dat['result']['transfers']
+    except KeyError:
+        return 0
     saved = 0
     for tx in txs:
         if not tx['to']:
@@ -415,6 +505,7 @@ def saveOutgoingTokenTransfers(fromAddress, chain):
                     toAddr = txToAddr,
                     coin = token.coin,
                     value = Decimal(0),
+                    token = token,
                 )
                 ttx.value = val
                 ttx.save()
@@ -425,18 +516,19 @@ def saveOutgoingTokenTransfers(fromAddress, chain):
         else:
             val = tx['value']
 
-        ttx = TokenTransfer(
-            transaction = t,
-            fromAddr = txFromAddr,
-            toAddr = txToAddr,
-            coin = token.coin,
-            value = val,
-        )
         try:
-            ttx.save()
-            saved += 1
+            ttx, created = TokenTransfer.objects.get_or_create(
+                transaction = t,
+                fromAddr = txFromAddr,
+                toAddr = txToAddr,
+                coin = token.coin,
+                value = val,
+                token = token,
+            )
+            if created:
+                saved += 1
         except Exception as e:
-            # print(str(e))
+            print(str(e))
             pass
 
     return saved
@@ -508,7 +600,7 @@ def saveTxTos(txs, sessionKey):
         connection.close()
 
 def getTxReceipt(tx):
-    api_key = os.environ.get(f"APIKEY_{tx.chain.symbol}")
+    api_key = os.environ.get(f"ALCHEMY_APIKEY")
     url = f"{tx.chain.endpoint}{api_key}"
     
     payload = {
@@ -580,36 +672,52 @@ def processApprovals(txs, sessionKey):
             processed += 1
             progress = round(100*processed/count)
             updateSession(sessionKey, progress=progress)
-        msg = f"{processed} tx fees successfully processed"
+        msg = f"{processed} tx successfully processed"
         updateSession(sessionKey, status="complete", msg=msg)
     except Exception as e:
         print(str(e))
         print(e)
+        print(traceback.format_exc())
         updateSession(sessionKey, status="error", msg=str(e))
     finally:
         connection.close()
 
-def isApproval(tx):
+def isApproval(tx, inputs=None):
     print(tx.id)
-    inputs = decodeInput(tx)
+    if inputs is None:
+        inputs = decodeInput(tx)
     if not inputs:
         return False
     return inputs[0].fn_name == "approve"
 
-def isDexTrade(tx):
+def isDexTrade(tx, inputs=None):
     print(tx.id)
-    inputs = decodeInput(tx)
+    if inputs is None:
+        inputs = decodeInput(tx)
     if not inputs:
         return False
-    return inputs[0].fn_name in ["multicall", "swapExactETHForTokens"]
+    return inputs[0].fn_name in ["multicall", "swapExactETHForTokens", "swapETHForExactTokens"]
+
+def isFailedTx(tx, receipt=None):
+    if receipt is None:
+        receipt = getTxRecipt(tx)
+    # print(receipt)
+    status = receipt['status']
+    # print(status)
+    # print(Web3.to_int(status))
+    return not bool(Web3.to_int(status))
+    # print(receipt['result'])
+
+    
 
 def isDepositOrSend(tx, web3=None, transfers=None, decodedLogs=None):
-    if web3 is None:
-        web3 = getWeb3(tx.chain)
-    if decodedLogs is None:
-        decodedLogs = decodeLogs(tx, web3)
+    # if web3 is None:
+    #     web3 = getWeb3(tx.chain)
+    # if decodedLogs is None:
+    #     decodedLogs = decodeLogs(tx, web3)
     if transfers is None:
-        transfers = getTransfersInOut(tx, web3, decodedLogs)
+        # transfers = getTransfersInOut(tx, web3, decodedLogs)
+        transfers = getTransfersInOut(tx)
     incoming, outgoing = transfers
     if outgoing and not incoming:
         return True
@@ -691,26 +799,31 @@ def processDexOops(buys, sales, sessionKey):
     finally:
         connection.close()
 
-def processBridgeSend(tx, web3=None, decodedLogs=None):
+def processBridgeSend(tx, ttx=None, web3=None, decodedLogs=None):
     if web3 is None:
         web3 = getWeb3(tx.chain)
     if decodedLogs is None:
         decodedLogs = decodeLogs(tx, web3)
-    incoming, outgoing = getTransfersInOut(tx, web3, decodedLogs)
-    if not outgoing:
-        return f"nothing going out. Not a bridge send? {tx.hash}"
-    if incoming:
-        return f"what's this coming in? Not a bridge send? {tx.hash}"
-    if len(outgoing)>1:
-        return f"too many outgoing tokens. {outgoing}\n{tx.hash}"
-    outgoing = outgoing[0]
+    if ttx is None:
+        incoming, outgoing = getTransfersInOut(tx, web3, decodedLogs)
+        if not outgoing:
+            return f"nothing going out. Not a bridge send? {tx.hash}"
+        if incoming:
+            return f"what's this coming in? Not a bridge send? {tx.hash}"
+        if len(outgoing)>1:
+            return f"too many outgoing tokens. {outgoing}\n{tx.hash}"
+        coin = outgoing[0]['coin']
+        units = outgoing[0]['amount']
+    else:
+        coin = ttx.coin
+        units = ttx.value
     
     bs = TokenBridge(
-        coin = outgoing['coin'],
-        unitsSent = outgoing['amount'],
+        coin = coin,
+        unitsSent = units,
         date=tx.date,
         user=tx.fromAddr.user,
-        feeCoin = outgoing['coin'],
+        feeCoin = coin,
         note = "Bridge Transfer",
         transactionSend = tx
     )
@@ -723,28 +836,32 @@ def processBridgeSend(tx, web3=None, decodedLogs=None):
 def processVaultDeposit(tx, web3=None, amount=None, coin=None, address=None):
     if web3 is None:
         web3 = getWeb3(tx.chain)
+    native = False
     if amount is None and coin is None:
         outs = tx.tokentransfer_set.filter(fromAddr=tx.fromAddr)
         assert outs.count() <= 1, f"hhhmmm, too many outgoing transfers {outs.values()}"
         if not outs.exists():
             amount = tx.value
             coin = tx.feeCoin
+            native = True
             assert amount > 0, f"No transfers out and no tx value? {tx.hash}"
         else:
             amount = outs[0].value
-            coin = outs[0].coin
+            coin = outs[0].token.coin
 
     if address is None:
         address = tx.toAddr.address
-    # try:
-    #     Token.objects.get(address=address, chain=tx.chain)
-    #     print("yep")
-    #     address = outs[0].toAddr.address
-    # except Token.DoesNotExist:
-    #     pass
+    try:
+        Token.objects.get(address=address, chain=tx.chain)
+        print("yep")
+        if not native:
+            address = outs[0].toAddr.address
+    except Token.DoesNotExist:
+        pass
     vault, created = Vault.objects.get_or_create(chain=tx.chain, address=address)
     if created:
         vault.name = getContractName(vault.address, tx.chain, web3)
+        vault.save()
 
     d = VaultDeposit(
         vault = vault,
@@ -761,7 +878,7 @@ def getVaultNames():
         v.name = getContractName(v.address, v.vaultdeposit_set.first().transaction.chain)
         v.save()
 
-def processVaultWithdrawal(tx, web3=None, amount=None, coin=None, address=None):
+def processVaultWithdrawal(tx, web3=None, amount=None, coin=None, address=None, ttx=None):
     if web3 is None:
         web3 = getWeb3(tx.chain)
     if address is None:
@@ -770,7 +887,11 @@ def processVaultWithdrawal(tx, web3=None, amount=None, coin=None, address=None):
         vault = Vault.objects.get(pk=6)
     else:
         vault = Vault.objects.get(chain=tx.chain, address=address)
-    
+
+    if ttx is not None:
+        amount = ttx.value
+        coin = ttx.token.coin
+
     if amount is None and coin is None:
         ins = tx.tokentransfer_set.filter(toAddr=tx.fromAddr)
         assert ins.count() <= 1, f"hhhmmm, too many incoming transfers {ins.values()}"
@@ -779,9 +900,11 @@ def processVaultWithdrawal(tx, web3=None, amount=None, coin=None, address=None):
             assert ins.count() == 1, f"hhhmmm, too many incoming transfers {ins.values()}"
 
         amount = ins[0].value
-        coin = ins[0].coin
+        coin = ins[0].token.coin
 
     balance = vault.getBalance()
+
+    amount = Decimal(amount)
 
     income = max(amount - balance, Decimal(0))
     withdrawn = amount - income
@@ -813,18 +936,25 @@ def processVaultWithdrawal(tx, web3=None, amount=None, coin=None, address=None):
 
     return msg
 
-def processVaultIncome(tx, web3=None):
+def processVaultIncome(tx, ttx=None, web3=None):
     if web3 is None:
         web3 = getWeb3(tx.chain)
-    vault = Vault.objects.get(chain=tx.chain, address=tx.toAddr.address)
-    ins = tx.tokentransfer_set.filter(toAddr=tx.fromAddr)
-    assert ins.count() <= 1, f"hhhmmm, too many incoming transfers {ins.values()}"
-    if not ins.exists():
-        ins = tx.internaltransaction_set.filter(toAddr=tx.fromAddr)
-        assert ins.count() == 1, f"hhhmmm, too many incoming transfers {ins.values()}"
+    if ttx is None:
+        ins = tx.tokentransfer_set.filter(toAddr=tx.fromAddr)
+        assert ins.count() <= 1, f"hhhmmm, too many incoming transfers {ins.values()}"
+        if not ins.exists():
+            ins = tx.internaltransaction_set.filter(toAddr=tx.fromAddr)
+            assert ins.count() == 1, f"hhhmmm, too many incoming transfers {ins.values()}"
+        ttx = ins.first()
 
-    amount = ins[0].value
-    coin = ins[0].coin
+    amount = ttx.value
+    coin = ttx.token.coin
+
+    try:
+        vault = Vault.objects.get(chain=tx.chain, address=tx.toAddr.address)
+    except Vault.DoesNotExist:
+        vault = Vault.objects.get(chain=tx.chain, address=ttx.fromAddr.address)
+
 
     i = VaultIncome(
         vault = vault,
@@ -848,7 +978,7 @@ def processVaultRestake(tx, web3=None):
         assert ins.count() == 1, f"hhhmmm, too many incoming transfers {ins.values()}"
 
     amount = ins[0].value
-    coin = ins[0].coin
+    coin = ins[0].token.coin
 
     i = VaultIncome(
         vault = vault,
@@ -911,9 +1041,36 @@ def processDexTrade(tx, bought=None, sold=None):
             print(f"nothing coming in. Not a dex trade? {tx.hash}")
             return
         if len(sold)>1 or len(bought)>1:
-            print(f"too many tokens coming in or out: \nbought: {bought}\nsoud: {sold}\n{tx.hash}")
-            return
+            print(f"too many tokens coming in or out: \nbought: {bought}\nsold: {sold}\n{tx.hash}")
+            fixed = False
+            if len(bought) == 2:
+                bTmp = []
+                for b in bought:
+                    if b['coin'] == sold[0]['coin']:
+                        sold[0]['amount'] -= b['amount']
+                        fixed = True
+                    else:
+                        bTmp.append(b)
+
+            if not fixed:
+                return
         bought = bought[0]
+        sold = sold[0]
+        sold['priceAUD'] = getPrice(sold['coin'], tx.date)
+        try:
+            bought['priceAUD'] = sold['priceAUD'] * sold['amount'] / bought['amount']
+        except KeyError:
+            print(bought)
+            print(sold)
+            raise
+
+    elif sold is None:
+        _, sold = getTransfersInOut(tx)
+        if not sold:
+            print(f"nothing going out. Not a dex trade? {tx.hash}")
+            return
+        if len(sold)>1:
+            print(f"too many tokens going out: \nsold: {sold}\n{tx.hash}")
         sold = sold[0]
         sold['priceAUD'] = getPrice(sold['coin'], tx.date)
         try:
@@ -958,62 +1115,259 @@ def processDexTrade(tx, bought=None, sold=None):
     print('sale entered')
     tx.processed = True
     tx.save()
-    
+    return "dex trade entered"
+
+def processHarvest(tx):
+    if isFailedTx(tx):
+        return processFailedTx(tx)
+    received, spent = getTransfersInOut(tx)
+    if len(received) == 0:
+        print("nothing received, no income")
+        return "nothing"
+    if tx.chain.name == "ZKsync Era":
+        assert len(spent) == 1, 'oops, we assumed only 1 outgoing'
+        coin = spent[0]['coin']
+        amount = -spent[0]['amount']
+        for r in received:
+            assert r['coin'] == coin, "hhhm, not the same coin"
+            amount += r['amount']
+        price = getPrice(coin, tx.date)
+        value = amount * price
+        income = Income.objects.create(
+            coin=coin,
+            units=amount,
+            unitPrice=price,
+            date=tx.date,
+            user=tx.fromAddr.user,
+            note=f"Calling harvest() on {tx.toAddr.address}",
+            amount=value,
+            transaction=tx
+        )
+        print("income saved")
+        income.createCostBasis()
+        print("cost basis created")
+        tx.processed = True
+        tx.save()
+    else:
+        first = True
+        for r in sorted(received, key=lambda x: x['amount'], reverse=True):
+            coin = r['coin']
+            price = getPrice(coin, tx.date)
+            value = r['amount'] * price
+            netIncome = value
+            if first:
+                netIncome -= tx.feeAUD
+                first = False
+            income = Income.objects.create(
+                coin=coin,
+                units=r['amount'],
+                unitPrice=price,
+                date=tx.date,
+                user=tx.fromAddr.user,
+                note=f"Calling harvest() on {tx.toAddr.address}",
+                amount=netIncome,
+                transaction=tx
+            )
+            print("income saved")
+            income.createCostBasis()
+            print("cost basis created")
+            tx.processed = True
+            tx.save()
+    return("Income saved")
+
+def processIncome(ttx, subtractFee=False, note="reward"):
+    coin = ttx.token.coin
+    price = getPrice(coin, ttx.transaction.date)
+    units = ttx.value
+    netIncome = units * price
+    if subtractFee:
+        netIncome -= ttx.transaction.feeAUD
+    # return f"units: {units}, netIncome: {netIncome}"
+    income = Income.objects.create(
+        coin=coin,
+        units=units,
+        unitPrice=price,
+        date=ttx.transaction.date,
+        user=ttx.transaction.fromAddr.user,
+        note=note,
+        amount=netIncome,
+        transaction=ttx.transaction
+    )
+    print("income saved")
+    if netIncome >= Decimal(0):
+        income.createCostBasis(fee=ttx.transaction.feeAUD if not subtractFee else Decimal(0))
+        print("cost basis created")
+    return "income saved"
+
+def processInitialAirdrop(ttx, subtractFee=False, note="Airdrop at token launch"):
+    coin = ttx.token.coin
+    price = Decimal(0)
+    units = ttx.value
+    netIncome = units * price
+    if subtractFee:
+        netIncome -= ttx.transaction.feeAUD
+    # return f"units: {units}, netIncome: {netIncome}"
+    income = Income.objects.create(
+        coin=coin,
+        units=units,
+        unitPrice=price,
+        date=ttx.transaction.date,
+        user=ttx.transaction.fromAddr.user,
+        note=note,
+        amount=netIncome,
+        transaction=ttx.transaction
+    )
+    print("airdrop saved")
+    if netIncome >= Decimal(0):
+        income.createCostBasis(fee=ttx.transaction.feeAUD if not subtractFee else Decimal(0))
+        print("cost basis created")
+    ttx.transaction.processed = True
+    ttx.transaction.save()
+    return "airdrop saved"
+
+def processFailedTx(tx):
+    income = Income.objects.create(
+        coin=tx.feeCoin,
+        units=-tx.fee,
+        unitPrice=tx.feeAUD/tx.fee,
+        date=tx.date,
+        user=tx.fromAddr.user,
+        note=f"Failed transaction fee as loss",
+        amount=-tx.feeAUD,
+        transaction=tx
+    )
+    tx.processed = True
+    tx.save()
+    print("Failed transaction saved as loss")
+    return "Failed transaction saved as loss"
+
+def nearestIncomingTransfer(tx):
+    ttx = TokenTransfer.objects.filter(toAddr=tx.fromAddr, chain=tx.chain, date__gte=tx.date)
+    ttx = ttx.order_by('date').first()
+    return ttx
+
+
+
 def getTransfersInOut(tx, web3=None, decodedLogs=None, addresses=None):
-    if web3 is None:
-        web3 = getWeb3(tx.chain)
-    if decodedLogs is None:
-        decodedLogs = decodeLogs(tx, web3)
+    #try to do it from db:
     if addresses is None:
-        addresses = [tx.fromAddr.address]
+        addresses = [tx.fromAddr]
     incoming = []
     outgoing = []
-    for log in decodedLogs:
-        if log.event in ["Transfer", "LogTransfer"]:
-            try:
-                coin = Token.objects.get(address=log.address, chain=tx.chain).coin
-            except Token.DoesNotExist:
-                coin = "unknown"
-            try:
-                toAddress = tryMultipleKeys(log.args, ['to', '_to'])
-                if toAddress in addresses:
-                    amt = tryMultipleKeys(log.args, ["amount", "_amount", "value", "_value"])
-                    amt = web3.from_wei(amt, 'ether')
-                    incoming.append({"coin": coin, "amount": amt})
-                    print("somethin")
-            except KeyError:
-                pass
-            except AttributeError:
-                print(tx.hash)
-                print(log)
-                raise
-            try:
-                fromAddress = tryMultipleKeys(log.args, ['from', '_from'])
-                if fromAddress in addresses:
-                    amt = tryMultipleKeys(log.args, ["amount", "_amount", "value", "_value"])
-                    amt = web3.from_wei(amt, 'ether')
-                    outgoing.append({"coin": coin, "amount": amt})
-                    print("somethin")
-            except KeyError:
-                pass
-            except AttributeError:
-                print(tx.hash)
-                print(log)
-                raise
+    for d in tx.internaltransaction_set.all():
+        if d.toAddr in addresses:
+            incoming.append({"coin": d.coin, "amount": d.value})
+        if d.fromAddr in addresses:
+            outgoing.append({"coin": d.coin, "amount": d.value})
+    for d in tx.tokentransfer_set.all():
+        if d.toAddr in addresses:
+            incoming.append({"coin": d.token.coin, "amount": d.value})
+        if d.fromAddr in addresses:
+            outgoing.append({"coin": d.token.coin, "amount": d.value})
+
+    ## Maybe we don't need all this?
+
+    # if web3 is None:
+    #     web3 = getWeb3(tx.chain)
+    # if decodedLogs is None:
+    #     decodedLogs = decodeLogs(tx, web3)
+    # if addresses is None:
+    #     addresses = [tx.fromAddr.address]
+    # incoming = []
+    # outgoing = []
+    # for log in decodedLogs:
+    #     if log.event in ["Transfer", "LogTransfer"]:
+    #         try:
+    #             coin = Token.objects.get(address=log.address, chain=tx.chain).coin
+    #         except Token.DoesNotExist:
+    #             coin = "unknown"
+    #         try:
+    #             toAddress = tryMultipleKeys(log.args, ['to', '_to'])
+    #             if toAddress in addresses:
+    #                 amt = tryMultipleKeys(log.args, ["amount", "_amount", "value", "_value"])
+    #                 amt = web3.from_wei(amt, 'ether')
+    #                 incoming.append({"coin": coin, "amount": amt})
+    #                 print("somethin")
+    #         except KeyError:
+    #             pass
+    #         except AttributeError:
+    #             print(tx.hash)
+    #             print(log)
+    #             raise
+    #         try:
+    #             fromAddress = tryMultipleKeys(log.args, ['from', '_from'])
+    #             if fromAddress in addresses:
+    #                 amt = tryMultipleKeys(log.args, ["amount", "_amount", "value", "_value"])
+    #                 amt = web3.from_wei(amt, 'ether')
+    #                 outgoing.append({"coin": coin, "amount": amt})
+    #                 print("somethin")
+    #         except KeyError:
+    #             pass
+    #         except AttributeError:
+    #             print(tx.hash)
+    #             print(log)
+    #             raise
 
     if not tx.value:
         val = getTxValue(tx, web3)
         tx.value = val
         tx.save()
-    if tx.value:
+    if tx.value and tx.fromAddr in addresses:
         for out in outgoing:
             if out['coin'] == tx.feeCoin and out['amount'] == tx.value:
                 break
-            else:
-                outgoing.append({"coin": tx.feeCoin, "amount": tx.value})
-        if not outgoing:
+        else:
             outgoing.append({"coin": tx.feeCoin, "amount": tx.value})
+    elif tx.value and tx.toAddr in addresses:
+        for inc in incoming:
+            if inc['coin'] == tx.feeCoin and inc['amount'] == tx.value:
+                break
+        else:
+            incoming.append({"coin": tx.feeCoin, "amount": tx.value})
+        # if not outgoing:
+        #     outgoing.append({"coin": tx.feeCoin, "amount": tx.value})
     return incoming, outgoing
+
+def notSpam(token, web3=None):
+    if web3 is None:
+        web3 = getWeb3(token.chain)
+
+    address = web3.to_checksum_address(token.address)
+    contract = loadContract(token.address, token.chain, web3)
+    if not contract:
+        print(f"no contract for {address} on {token.chain.name}")
+        return "no contract"
+    name = getContractName(address, token.chain, web3, contract)
+    symbol = getContractSymbol(address, token.chain, web3, contract)
+    try:
+        name = web3.to_text(name).replace('\x00', '')
+    except:
+        pass
+    try:
+        symbol = web3.to_text(symbol).replace('\x00', '')
+    except:
+        pass
+    print(f"gonna create {name} - {symbol}\nfor {address} on {token.chain.name}")
+    found = False
+    allCoins = cg.get_coins_list(include_platform=True) 
+    for c in allCoins:
+        for ch, ad in c['platforms'].items():
+            if ad.lower() == address.lower():
+                found = True
+                coin, created = Coin.objects.get_or_create(
+                    coingecko_id = c['id'],
+                    defaults = {'name': name, 'symbol': symbol}
+                )
+                break
+
+    if not found:
+        print("no coin found")
+        return "no coin found"
+
+    token.coin = coin
+    token.save()
+    print(f"token saved as {'new coin' if created else ''} {coin.symbol}: {coin.name}")
+    return f"token saved as {'new coin' if created else ''} {coin.symbol}: {coin.name}"
 
 def getOrCreateToken(address, chain, web3=None):
     if web3 is None:
@@ -1045,9 +1399,23 @@ def getOrCreateToken(address, chain, web3=None):
         except:
             pass
         print(f"gonna create {name} - {symbol}\nfor {address} on {chain.name}")
-        try:
-            coin = Coin.objects.get(symbol__iexact=symbol)
-        except Coin.DoesNotExist:
+        # try:
+        #     coin = Coin.objects.get(symbol__iexact=symbol)
+        # except Coin.DoesNotExist:
+            #try to get it from the endpoint
+        found = False
+        allCoins = cg.get_coins_list(include_platform=True) 
+        for c in allCoins:
+            for ch, ad in c['platforms'].items():
+                if ad.lower() == address.lower():
+                    found = True
+                    coin, created = Coin.objects.get_or_create(
+                        coingecko_id = c['id'],
+                        defaults = {'name': name, 'symbol': symbol}
+                    )
+                    break
+
+        if not found:
             print("no coin found, saving as spam")
             token = Token(
                 chain = chain,
@@ -1073,8 +1441,14 @@ def getABI(contractAddress, chain):
         # print("loading ABI from db")
     except Contract.DoesNotExist:
         # print("downloading abi")
-        api_key = os.environ.get(f"EXPLORER_APIKEY_{chain.symbol}")
-        url = f"https://api.{chain.explorer}/api?module=contract&action=getabi&address={contractAddress}&apikey={api_key}"
+        if chain.name == "ZKsync Era":
+            url = f"https://block-explorer-api.mainnet.zksync.io/api?module=contract&action=getabi&address={contractAddress}"
+        else:
+            api_key = os.environ.get(f"EXPLORER_APIKEY_{chain.symbol}")
+            if chain.name == "Optimism":
+                url = f"https://api-{chain.explorer}/api?module=contract&action=getabi&address={contractAddress}&apikey={api_key}"
+            else:
+                url = f"https://api.{chain.explorer}/api?module=contract&action=getabi&address={contractAddress}&apikey={api_key}"
         contract = Contract(address=contractAddress, chain=chain)
         contract.saveABI(requests.get(url).text)
         # assert False, 'yep'
@@ -1100,25 +1474,35 @@ def loadContract(address, chain, web3):
             implementationSlot = web3.to_hex(web3.to_int(web3.keccak(text='eip1967.proxy.implementation')) - 1)
             beaconSlot = web3.to_hex(web3.to_int(web3.keccak(text='eip1967.proxy.beacon')) - 1)
             implementation = web3.eth.get_storage_at(address, implementationSlot)
+            # print(f"implementation slot holds: {implementation}")
             beacon = web3.eth.get_storage_at(address, beaconSlot)
+            if web3.to_int(beacon) and not web3.to_int(implementation):
+                # remove leading zeros
+                beaconAddress = web3.to_checksum_address(web3.to_hex(beacon[-20:]))
+                print(f"beacon at: {beaconAddress}, for {address}")
+                beaconAbi = getABI(beaconAddress, chain)
+                if beaconAbi == 'Contract source code not verified':
+                    return None
+                beaconContract = web3.eth.contract(beaconAddress, abi=beaconAbi)
+                # assert False, "beacon"
+                try:
+                    implementation = beaconContract.functions.implementation().call()
+                except ABIFunctionNotFound:
+                    print("beaon doesn't implement implementation()? Nope.")
+                    return None
+                implementation = web3.to_bytes(hexstr=implementation)
             if web3.to_int(implementation):
                 # remove leading zeros
                 # newAddress = web3.to_hex(web3.to_int(implementation))
-                newAddress = web3.to_checksum_address(web3.to_hex(web3.to_int(implementation)))
+                # print(web3.to_hex(implementation))
+                # print(web3.to_hex(implementation[-20:]))
+                # print(type(implementation))
+                newAddress = web3.to_checksum_address(web3.to_hex(implementation[-20:]))
                 print(f"proxy for: {newAddress}")
                 abi = getABI(newAddress, chain)
                 if abi == 'Contract source code not verified':
                     return None
                 contract = web3.eth.contract(newAddress, abi=abi)
-            if web3.to_int(beacon):
-                # remove leading zeros
-                beaconAddress = web3.to_hex(web3.to_int(beacon))
-                print(f"beacon at: {beaconAddress}")
-                beaconAbi = getABI(beaconAddress, chain)
-                if beaconAbi == 'Contract source code not verified':
-                    return None
-                beaconContract = web3.eth.contract(beaconAddress, abi=beaconAbi)
-                assert False, "beacon"
         except:
             raise
     return contract
@@ -1169,42 +1553,46 @@ def decodeLog(tx, logIndex, web3=None):
         return
     
 def decodeLogs(tx, web3=None):
-    if web3 is None:
-        web3 = getWeb3(tx.chain)
-    # receipt = getTxReceipt(tx)
-    receipt = web3.eth.get_transaction_receipt(tx.hash)
-    decoded_logs_out = []
-    for log in receipt['logs']:
-        found = False
-        log_index = log['logIndex']
-        contract = loadContract(log['address'], tx.chain, web3)
-        if not contract:
-            print("no abi")
-            continue
-        receipt_event_signature_hex = web3.to_hex(log["topics"][0])
-        abi_events = [a for a in contract.abi if a["type"] == "event"]
-        # Determine which event in ABI matches the transaction log you are decoding
-        for event in abi_events:
-            # print(f"trying {event['name']}")
-            # or get it from web3
-            eventABI = contract.events[event["name"]]()
-            event_signature = event_abi_to_log_topic(eventABI.abi)
+    try:
+        if web3 is None:
+            web3 = getWeb3(tx.chain)
+        # receipt = getTxReceipt(tx)
+        receipt = web3.eth.get_transaction_receipt(tx.hash)
+        decoded_logs_out = []
+        for log in receipt['logs']:
+            found = False
+            log_index = log['logIndex']
+            contract = loadContract(log['address'], tx.chain, web3)
+            if not contract:
+                print("no abi")
+                continue
+            receipt_event_signature_hex = web3.to_hex(log["topics"][0])
+            abi_events = [a for a in contract.abi if a["type"] == "event"]
+            # Determine which event in ABI matches the transaction log you are decoding
+            for event in abi_events:
+                # print(f"trying {event['name']}")
+                # or get it from web3
+                eventABI = contract.events[event["name"]]()
+                event_signature = event_abi_to_log_topic(eventABI.abi)
 
-            if web3.to_hex(event_signature) == receipt_event_signature_hex:
+                if web3.to_hex(event_signature) == receipt_event_signature_hex:
 
-            # Find match between log's event signature and ABI's event signature
-            # if event_signature_hex == receipt_event_signature_hex:
-                # Decode matching log
-                for decoded_logs in contract.events[event["name"]]().process_receipt(receipt):
-                    if decoded_logs.logIndex == log_index:
-                        decoded_logs_out.append(decoded_logs)
-                        found = True
-                        break
-            if found:
-                break
-        if not found:
-            print(f"index {log_index} event not decoded")
-    return decoded_logs_out
+                # Find match between log's event signature and ABI's event signature
+                # if event_signature_hex == receipt_event_signature_hex:
+                    # Decode matching log
+                    for decoded_logs in contract.events[event["name"]]().process_receipt(receipt):
+                        if decoded_logs.logIndex == log_index:
+                            decoded_logs_out.append(decoded_logs)
+                            found = True
+                            break
+                if found:
+                    break
+            if not found:
+                print(f"index {log_index} event not decoded")
+        return decoded_logs_out
+    except:
+        print(traceback.format_exc())
+        return
 
 def checkForTransfers(tx):
     tokens = []
@@ -1231,10 +1619,12 @@ def getContractName(address, chain, web3=None, contract=None):
     if contract is None:
         contract = loadContract(address, chain, web3)
         if not contract:
+            print("nocontract")
             return None
     try:
         name =  contract.functions.name().call()
     except ABIFunctionNotFound:
+        print("ABIFunctionNotFound")
         name = None
     return name
 

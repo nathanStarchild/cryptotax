@@ -52,7 +52,14 @@
                             {% endfor %}
                             {% for d in tx.tokentransfer_set.all %}
                                 {% if d.fromAddr.user == user %}
-                                    <div>{{d.value|floatformat:"-4g"}} {{d.coin.symbol}}</div>
+                                    <div>
+                                        {{d.value|floatformat:"-4g"}} {{d.token.coin.symbol}}
+                                        {% if d.token.coin.name == "spam" %}
+                                            <button type="button" class="btn btn-primary btn-notspam processBtn" data-url="{% url 'ajaxTokenNotSpam' d.token.id %}">
+                                                Not Spam
+                                            </button>
+                                        {% endif %}
+                                    </div>
                                 {% endif %}
                             {% endfor %}
                         </td>
@@ -67,7 +74,15 @@
                             {% endfor %}
                             {% for d in tx.tokentransfer_set.all %}
                                 {% if d.toAddr.user == user %}
-                                    <div>{{d.value|floatformat:"-4g"}} {{d.coin.symbol}}</div>
+                                    <div>
+                                        {{d.value|floatformat:"-4g"}} {{d.token.coin.symbol}}
+                                        {% if d.token.coin.id == 11160 %}
+                                            <button type="button" class="btn btn-primary btn-notspam processBtn" data-url="{% url 'ajaxTokenNotSpam' d.token.id %}">
+                                                Not Spam
+                                            </button>
+                                        {% endif %}
+
+                                    </div>
                                 {% endif %}
                             {% endfor %}
                         </td>
@@ -89,17 +104,160 @@
                         {% else %} 
                             <div class="mt-2 d-flex flex-row justify-content-center">
                                 <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxMarkAsProcessed' tx.id %}">Mark as Processed</button>  
-                                <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxProcessBridgeSend' tx.id %}">As Bridge Send</button>  
+                                <button class="btn btn-primary btn-outgoing m-1" data-bs-target="#selectOutgoing" data-bs-toggle="collapse" data-action="{% url 'ajaxProcessBridgeSend' tx.id %}">As Bridge Send</button>  
+                                <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxProcessDexTrade' tx.id %}">As Dex Trade</button>
+                                <button class="btn btn-primary btn-cowSwap m-1">As CoW Swap</button>  
+                                <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxProcessHarvest' tx.id %}">As Harvest()</button>  
+                                <button type="button" class="btn btn-primary btn-incoming m-1" data-bs-target="#selectIncoming" data-bs-toggle="collapse" data-action="{% url 'ajaxProcessIncome' %}">As income</button> 
+                                <button type="button" class="btn btn-primary btn-incoming m-1" data-bs-target="#selectIncoming" data-bs-toggle="collapse" data-action="{% url 'ajaxProcessInitialAirdrop' %}">As Airdrop at launch</button> 
+                                <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxProcessFailedTx' tx.id %}">As Failed</button>  
                             </div>
                             <div class="mt-2 d-flex flex-row justify-content-center">
-                                <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxProcessVaultDeposit' tx.id %}">As Vault Deposit</button>  
-                                <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxProcessVaultIncome' tx.id %}">As Vault Income</button>   
-                                <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxProcessVaultWithdrawal' tx.id %}">As Vault Withdrawal</button>  
+                                <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxProcessVaultDeposit' tx.id %}">As Vault Deposit</button>
+                                <button class="btn btn-primary btn-incoming m-1" data-bs-target="#selectIncoming" data-bs-toggle="collapse" data-action="{% url 'ajaxProcessVaultIncome' tx.id %}">As Vault Income</button>
+                                <button type="button" class="btn btn-primary btn-incoming m-1" data-bs-target="#selectIncoming" data-bs-toggle="collapse" data-action="{% url 'ajaxProcessVaultDepositAndIncome' tx.id %}">As Vault Income and Deposit</button> 
+                                <button class="btn btn-primary btn-incoming m-1" data-bs-target="#selectIncoming" data-bs-toggle="collapse" data-action="{% url 'ajaxProcessVaultWithdrawal' tx.id %}">As Vault Withdrawal</button>
                                 <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxProcessVaultRestake' tx.id %}">As Vault Restake</button> 
                             </div> 
                             <div class="mt-2 d-flex flex-row justify-content-center">
                                 <button type="button" class="btn btn-primary m-1" data-bs-target="#migrate" data-bs-toggle="collapse">As Vault Migration</button> 
                                 <button type="button" class="btn btn-primary m-1" data-bs-target="#withdrawAndTrade" data-bs-toggle="collapse">As Vault Withdraw and Trade</button> 
+                            </div>
+
+                            <div class="mt-2 d-flex flex-row justify-content-center">
+                                <button class="btn btn-primary matchingBtn m-1" data-url="{% url 'ajaxFindMatchingTxs' tx.id %}">Find Matching Txs</button>  
+                            </div>
+
+
+                            <div id="selectIncoming" class="collapse mt-2">
+                                <form id="incomingForm" method="post" action="tmp">                                                    
+                                    {% csrf_token %}                                                    
+                                    <div class="d-flex flex-column justify-content-center">
+                                        <div class="mt-1">
+                                            <label>Which incoming token:
+                                                <select class="form-select" name="ttx">
+                                                    {% for d in tx.tokentransfer_set.all %}
+                                                        {% if d.toAddr.user == user %}
+                                                            <option value="{{d.id}}">{{d.value|floatformat:"-4g"}} {{d.token.coin.symbol}}</option>
+                                                        {% endif %}
+                                                    {% endfor %}
+                                                </select>
+                                            </label>
+                                        </div>
+                                        <div class="mt-1">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="subtractFee" value="" id="flexCheckDefault">
+                                                <label class="form-check-label" for="flexCheckDefault">
+                                                    Subtract Transaction Fee
+                                                </label>
+                                          </div>
+                                        </div>
+                                        <div class="mt-1">
+                                            <label>Note:
+                                                <input type="text" class="form-control" name="note">
+                                            </label>
+                                        </div>
+                                        <div class="mt-1">
+                                            <button id="submitIncoming" data-form="incomingForm" type="button" class="btn btn-primary btn-submit">Submit</button>
+                                        </div>
+                                    </div>      
+                                    
+                                </form>
+                            </div>
+
+                            <div id="selectOutgoing" class="collapse mt-2">
+                                <form id="outgoingForm" method="post" action="tmp">                                                    
+                                    {% csrf_token %}                                                    
+                                    <div class="d-flex flex-column justify-content-center">
+                                        <div class="mt-1">
+                                            <label>Which outgoing token:
+                                                <select class="form-select" name="ttx">
+                                                    {% for d in tx.tokentransfer_set.all %}
+                                                        {% if d.fromAddr.user == user %}
+                                                            <option value="{{d.id}}">{{d.value|floatformat:"-4g"}} {{d.token.coin.symbol}}</option>
+                                                        {% endif %}
+                                                    {% endfor %}
+                                                </select>
+                                            </label>
+                                        </div>
+                                        <div class="mt-1">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="subtractFee" value="" id="flexCheckDefault">
+                                                <label class="form-check-label" for="flexCheckDefault">
+                                                    Subtract Transaction Fee
+                                                </label>
+                                          </div>
+                                        </div>
+                                        <div class="mt-1">
+                                            <label>Note:
+                                                <input type="text" class="form-control" name="note">
+                                            </label>
+                                        </div>
+                                        <div class="mt-1">
+                                            <button id="submitOutgoing" data-form="outgoingForm" type="button" class="btn btn-primary btn-submit">Submit</button>
+                                        </div>
+                                    </div>      
+                                    
+                                </form>
+                            </div>
+
+                            <div id="income" class="collapse mt-2">
+                                <form id="incomeForm" method="post" action="{% url 'ajaxProcessIncome' %}">                                                    
+                                    {% csrf_token %}                                                    
+                                    <div class="d-flex flex-column justify-content-center">
+                                        <div class="mt-1">
+                                            <label>Which incoming token:
+                                                <select class="form-select" name="ttx">
+                                                    {% for d in tx.tokentransfer_set.all %}
+                                                        {% if d.toAddr.user == user %}
+                                                            <option value="{{d.id}}">{{d.value|floatformat:"-4g"}} {{d.token.coin.symbol}}</option>
+                                                        {% endif %}
+                                                    {% endfor %}
+                                                </select>
+                                            </label>
+                                        </div>
+                                        <div class="mt-1">
+                                            <div class="form-check">
+                                                <input class="form-check-input" type="checkbox" name="subtractFee" value="" id="flexCheckDefault">
+                                                <label class="form-check-label" for="flexCheckDefault">
+                                                    Subtract Transaction Fee
+                                                </label>
+                                          </div>
+                                        </div>
+                                        <div class="mt-1">
+                                            <label>Note:
+                                                <input type="text" class="form-control" name="note">
+                                            </label>
+                                        </div>
+                                        <div class="mt-1">
+                                            <button id="submitIncome" data-form="incomeForm" type="button" class="btn btn-primary btn-submit">Submit</button>
+                                        </div>
+                                    </div>      
+                                    
+                                </form>
+                            </div>
+
+                            <div id="airdrop" class="collapse mt-2">
+                                <form id="airdropForm" method="post" action="{% url 'ajaxProcessInitialAirdrop' %}">                                                    
+                                    {% csrf_token %}                                                    
+                                    <div class="d-flex flex-column justify-content-center">
+                                        <div class="mt-1">
+                                            <label>Which incoming token:
+                                                <select class="form-select" name="ttx">
+                                                    {% for d in tx.tokentransfer_set.all %}
+                                                        {% if d.toAddr.user == user %}
+                                                            <option value="{{d.id}}">{{d.value|floatformat:"-4g"}} {{d.token.coin.symbol}}</option>
+                                                        {% endif %}
+                                                    {% endfor %}
+                                                </select>
+                                            </label>
+                                        </div>
+                                        <div class="mt-1">
+                                            <button id="submitAirdrop" data-form="airdropForm" type="button" class="btn btn-primary btn-submit">Submit</button>
+                                        </div>
+                                    </div>      
+                                    
+                                </form>
                             </div>
 
                             <div id="migrate" class="collapse mt-2">
@@ -273,9 +431,25 @@
 {% block inlineJS %}
     <script>
         $(document).ready(function(){
+            matchingIds = []
             $(".coinSelect").autoComplete();
             $(".processBtn").click(async function() {
+                $("#message").slideUp();
                 let url = $(this).data('url')
+                if (matchingIds.length > 0){
+                    for (const txId of matchingIds) {
+                        $("#message").slideUp();
+                        let newUrl = url.replace("/{{tx.id}}/", `/${txId}/`)
+                        let resp = await fetch(newUrl)
+                        let res = await resp.json()
+        
+                        if (res.msg){
+                            $("#messageContent").text(res.msg);
+                            $("#message").slideDown();
+                        }
+                    }
+                    return
+                }
                 let resp = await fetch(url)
                 let res = await resp.json()
 
@@ -293,6 +467,50 @@
                 if (res.msg){
                     $("#messageContent").text(res.msg);
                     $("#message").slideDown();
+                }
+            })
+
+            $(".btn-cowSwap").click(async function() {
+                let url = "{% url 'ajaxNearestIncomingTransfer' tx.id %}"
+                $("#message").slideUp();
+                let resp = await fetch(url)
+                let res = await resp.json()
+                if (res.ok){
+                    if (confirm(res.msg)){
+                        let url2 = '{% url "ajaxProcessCoWSwap" tx.id "!ttx" %}'.replace('!ttx', res.ttxId)
+                        let resp2 = await fetch(url2)
+                        let res2 = await resp2.json()
+                        if (res2.msg){
+                            $("#messageContent").text(res2.msg);
+                            $("#message").slideDown();
+                        }
+                    }
+                }
+            })
+
+            $(".btn-incoming").click(function() {
+                $("#incomingForm").attr("action", $(this).data("action"))
+            })
+
+            $(".btn-outgoing").click(function() {
+                $("#outgoingForm").attr("action", $(this).data("action"))
+            })
+
+
+            $(".matchingBtn").click(async function() {
+                console.log("aha")
+                let url = $(this).data('url')
+                let resp = await fetch(url)
+                let res = await resp.json()
+                console.log(res)
+
+                if (res.msg){
+                    $("#messageContent").text(res.msg);
+                    $("#message").slideDown();
+                }
+                if (res.ids) {
+                    matchingIds = res.ids
+                    console.log(matchingIds)
                 }
             })
         });

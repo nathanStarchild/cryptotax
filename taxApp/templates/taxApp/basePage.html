@@ -14,7 +14,7 @@
 	<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.1/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-F3w7mX95PdgyTmZZMECAngseQB83DfGTowi0iMjiWaeVhAn4FJkqJByhZMI3AhiU" crossorigin="anonymous">
 
 	<!-- JQueryUI  -->
-	{% comment %} <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css"> {% endcomment %}
+	<link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
 
 	{% comment %} <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.1.2/css/bootstrap.min.css" integrity="sha384-Smlep5jCw/wG7hdkwQ/Z5nLIefveQRIY9nfy6xoR1uRYBtpZgI6339F5dgvm/e9B" crossorigin="anonymous"> {% endcomment %}
 	
@@ -27,7 +27,7 @@
 	<!-- bootstrap -->
 	<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.1/dist/js/bootstrap.bundle.min.js" integrity="sha384-/bQdsTh/da6pkI1MST/rWKFNjaCP5gBSY4sEBT38Q/9RBh9AH40zEOg7Hlq2THRZ" crossorigin="anonymous"></script>
 	<!-- JQuery UI -->
-	{% comment %} <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script> {% endcomment %}
+	<script src="https://code.jquery.com/ui/1.12.1/jquery-ui.js"></script>
 	<!-- Autocomplete -->
 	<script src="{% static 'js/bootstrap-autocomplete-v300.js' %}"></script>
 	{% comment %} <script src="https://cdn.jsdelivr.net/gh/xcash/bootstrap-autocomplete@v2.3.7/dist/latest/bootstrap-autocomplete.min.js"></script> {% endcomment %}
@@ -41,7 +41,7 @@
 	<script src="{% static 'js/jquery.debounce-1.0.5.js' %}"></script>
 
 	<!-- Our JS -->
-	<script src="{% static 'js/taxApp.js' %}"></script>
+{#	<script src="{% static 'js/taxApp.js' %}"></script>#}
 	{% include "taxApp/base.js" %}
 	{% block inlineJS %}{% endblock inlineJS %}
 	{% comment %} {% include 'session_security/all.html' %} {% endcomment %}

@@ -3,6 +3,7 @@
     <div class="centeredGrid">
         <div class="d-flex flex-column">
             <h3 class="centeredGrid">Purchases</h3>
+            {% include "taxApp/dateAndCoinForm.html" %}
             <table class="table table-bordered table-hover table-responsive-md">
                 <thead class="thead-light">
                     <tr id="tableHead">
@@ -11,11 +12,17 @@
                         <th class="text-center align-middle">Units</th>
                         <th class="text-center align-middle">Price</th>
                         <th class="text-center align-middle">Fee</th>
+                        <th class="text-center align-middle">Cost</th>
                         <th class="text-center align-middle">Note</th>
                         <th class="text-center align-middle">Reference ID</th>
                     </tr>
                 </thead>
                 <tbody>
+                    <tr>
+                        <th colspan="3" class="text-center">Average</th>
+                        <th class="text-end">${{avg_price|floatformat:"-4g"}}</th>
+                        <th colspan="4"></th>
+                    </tr>
                     {% for d in data %}
                         <tr>
                             <td>{{d.date|date:'d/m/Y'}}</td>
@@ -23,6 +30,7 @@
                             <td class="text-end">{{d.units|floatformat:"-4g"}}</td>
                             <td class="text-end">${{d.unitPrice|floatformat:"-4g"}}</td>
                             <td class="text-end">${{d.feeAUD|floatformat:"-2"}}</td>
+                            <td class="text-end">${{d.cost|floatformat:"-2"}}</td>
                             <td>{{d.note}}</td>
                             <td>{{d.refId}}</td>
                         </tr>
@@ -33,3 +41,12 @@
     </div>
 
 {% endblock content %}
+
+{% block inlineJS %}
+    <script>
+        $(document).ready(function(){
+            fromDateToDatePickers()
+            $(".coinselect").autoComplete()
+        });
+    </script>
+{% endblock inlineJS %}

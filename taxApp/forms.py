@@ -32,3 +32,32 @@ class newTokenForm(forms.ModelForm):
     class Meta:
         model = Token
         fields = "__all__"
+
+class DateAndCoinForm(forms.Form):
+    fromDate = forms.DateField(
+        label="From Date",
+        input_formats=["%d/%m/%Y"],
+        widget=forms.DateInput(attrs={'class': 'form-control', 'autocomplete': 'off'}),
+        required=False,
+    )
+    toDate = forms.DateField(
+        label="To Date",
+        input_formats=["%d/%m/%Y"],
+        widget=forms.DateInput(attrs={'class': 'form-control', 'autocomplete': 'off'}),
+        required=False,
+    )
+
+    coin = forms.ModelChoiceField(
+        queryset=Coin.objects.all(),
+        required=False,
+    )
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if not self._errors:
+            start_date = cleaned_data.get("fromDate")
+            end_date = cleaned_data.get("toDate")
+            if start_date is None or end_date is None:
+                return
+            if end_date < start_date:
+                raise forms.ValidationError("End date must be greater than start date.")

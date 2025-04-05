@@ -5,10 +5,10 @@
         <h3 class="centeredGrid">Import Transactions</h3>
         <div class="d-flex flex-row justify-content-center">
             <button id="importTxsBtn" class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportTransactions' %}">Get new outgoing transactions</button>
-            <button class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportIncomingTransactions' %}">Get new incoming transactions</button>
+            <button class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportIncomingTransactions' %}">NOPE Get new incoming transactions</button>
             <button class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportIncomingInternal' %}">Get new incoming internal transactions</button>
             <button class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportTokenTransfers' %}">Get new token transfers</button>
-            <button id="getTosBtn" class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportTxTos' %}">Get transaction "to" addresses</button>
+            <button id="getTosBtn" class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportTxTos' %}">NOPE Get transaction "to" addresses</button>
             <button id="getFeesBtn" class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportTxFees' %}">Get transaction fees</button>
             <button id="getFeesBtn" class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxTxFeeSpends' %}">Get transaction fees AUD</button>
             <button id="getValuesBtn" class="btn btn-primary importBtn m-1" data-url="{% url 'ajaxImportTxValues' %}">Get transaction values</button>

@@ -401,7 +401,9 @@ def importSwyftxAUD(file, user):
         if row['Event'] == "deposit":
             amount = row['Amount']
         else:
-            assert False, 'not a deposit!'
+            # assert False, 'not a deposit!'
+            print("not a deposit")
+            continue
 
         refId = row["UUID"]
 

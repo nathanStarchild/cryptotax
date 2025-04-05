@@ -6,6 +6,8 @@
             <table class="table table-bordered table-hover table-responsive-md">
                 <thead class="thead-light">
                     <tr id="tableHead">
+                        <th class="text-center align-middle">Name</th>
+                        <th class="text-center align-middle">Symbol</th>
                         <th class="text-center align-middle">Coin</th>
                         <th class="text-center align-middle">Chain</th>
                         <th class="text-center align-middle">Address</th>
@@ -14,6 +16,8 @@
                 <tbody>
                     {% for d in data %}
                         <tr>
+                            <td>{{d.name}}</td>
+                            <td>{{d.symbol}}</td>
                             <td>{{d.coin.name}}</td>
                             <td>{{d.chain.name}}</td>
                             <td><a href="{{d.explorerUrl}}">{{d.address}}</a></td>

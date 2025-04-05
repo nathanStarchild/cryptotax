@@ -1,0 +1,29 @@
+<form method="post">
+    {% csrf_token %}
+    <div class="d-flex flex-row justify-content-end">
+        <div class="inputcell mx-1">
+            {{ form.fromDate.label_tag }}
+            {{ form.fromDate }}
+        </div>
+        <div class="inputcell mx-1">
+            {{ form.toDate.label_tag }}
+            {{ form.toDate }}
+        </div>
+        <div class="inputcell mx-1">
+            {{ form.coin.label_tag }}
+                <select
+                    class="form-control coinselect"
+                    id="id_coin"
+                    name="coin"
+                    autocomplete="off"
+                    data-url={% url 'ajaxSearchCoinsOfUser' %}
+                    data-addClass="form-select"
+                >
+                </select>
+
+        </div>
+        <div class="mx-1">
+            <button type="submit" class="btn btn-primary">Search</button>
+        </div>
+    </div>
+</form>
