@@ -90,6 +90,12 @@ class Chain(models.Model):
         managed = True
         db_table = 'chains'
 
+    def __repr__(self):
+        return self.name
+
+    def __str__(self):
+        return self.name
+
 class Token(models.Model):
     coin = models.ForeignKey(Coin, on_delete=models.CASCADE)
     chain = models.ForeignKey(Chain, on_delete=models.CASCADE)
@@ -646,7 +652,11 @@ class Contract(models.Model):
     def getABI(self):
         with ABIStorage.open(self.abi.name, mode='r') as f:
             dat = json.load(f)
-        return dat['result']
+        try:
+            return dat['result']
+        except KeyError:
+            return dat['abi']
+        # return dat['result']
     
     def saveABI(self, datString):
         with open("tmp/tmp.abi", 'w') as f:

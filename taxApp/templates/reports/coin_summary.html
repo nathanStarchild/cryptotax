@@ -1,0 +1,63 @@
+{% extends 'taxApp/basePage.html' %}
+{% block content %}
+    <div class="centeredGrid">
+        <div class="d-flex flex-column">
+            <h3 class="centeredGrid">Coin Summary {{ coin.name }}</h3>
+            {% include "taxApp/dateAndCoinForm.html" %}
+
+            <div>
+                <h2>Holdings</h2>
+                <p>Units: {{ holdings.units|floatformat:"-4g" }}</p>
+                <p>AUD Value: ${{ holdings.value|floatformat:"-2g" }}</p>
+                <p>AVG Buy Price: ${{ holdings.avg|floatformat:"-2g" }}</p>
+                <p>Current Price: ${{ holdings.price|floatformat:"-2g" }}</p>
+
+                <h2>Profits</h2>
+                <p>Total Profits: ${{ profits.total|floatformat:"-2g" }}</p>
+                <p>Realised Profits: ${{ profits.realised|floatformat:"-2g" }}</p>
+                <p>Unrealised Profits: ${{ profits.unrealised|floatformat:"-2g" }}</p>
+            </div>
+
+            {% for cat, details in data.items %}
+                <h3>{{ cat }}</h3>
+                <table class="table table-bordered table-hover table-responsive-md">
+                <thead class="thead-light">
+                    <tr id="tableHead">
+                        <th class="text-center align-middle">Date</th>
+                        <th class="text-center align-middle">Units</th>
+                        <th class="text-center align-middle">Price</th>
+                        <th class="text-center align-middle">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <th></th>
+                        <th class="text-end">{{details.total_units|floatformat:"-4g"}}</th>
+                        <th></th>
+                        <th class="text-end">${{details.total_value|floatformat:"-2g"}}</th>
+                    </tr>
+                    {% for d in details.txs %}
+                        <tr>
+                            <td>{{d.date|date:'d/m/Y'}}</td>
+                            <td class="text-end">{{d.units|floatformat:"-4g"}}</td>
+                            <td class="text-end">${{d.unitPrice|floatformat:"-4g"}}</td>
+                            <td class="text-end">${{d.total_value|floatformat:"-2"}}</td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endfor %}
+
+        </div>
+    </div>
+
+{% endblock content %}
+
+{% block inlineJS %}
+    <script>
+        $(document).ready(function(){
+            fromDateToDatePickers()
+            $(".coinselect").autoComplete()
+        });
+    </script>
+{% endblock inlineJS %}

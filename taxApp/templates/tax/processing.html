@@ -17,8 +17,9 @@
         <div class="d-flex flex-row justify-content-center">
             <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxGetCGTEvents' '!year' %}" disabled>Get CGT Events</button>
             <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxCalculateCGT' '!year' '!applyLAndD'%}" disabled>Calculate CGT</button>
-            <a class="btn btn-primary m-1 downloadLink" href="{% url 'taxReportCsv' '!year' %}">download tax report</a>
-            <a class="btn btn-primary m-1 downloadLink" href="{% url 'FYReportCsv' '!year' %}">download FY report</a>
+            <a class="btn btn-primary m-1 downloadLink" href="{% url 'taxReportCsv' '!year' %}">download full tax report</a>
+            <a class="btn btn-primary m-1 downloadLink" href="{% url 'taxReportCsvHeadlines' '!year' %}">download coin summaries report</a>
+            <a class="btn btn-primary m-1 downloadLink" href="{% url 'FYReportCsv' '!year' %}">download FY Summary</a>
         </div>
     </div>
 </div>

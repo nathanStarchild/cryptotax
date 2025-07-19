@@ -9,6 +9,8 @@ from zoneinfo import ZoneInfo
 
 cg = CoinGeckoAPI(api_key=os.environ.get('COINGECKO_APIKEY'))
 # cg = CoinGeckoAPI(api_key='notanapikey')
+hyETH = Coin.objects.get(pk=11182)
+wstETH = Coin.objects.get(pk=10707)
 
 def getPrice(coin, date):
     now = date == "now"
@@ -29,7 +31,14 @@ def getPrice(coin, date):
             price = Decimal(res[coin.coingecko_id]['aud'])
         else:
             data = cg.get_coin_history_by_id(id=coin.coingecko_id, date=date.strftime("%d-%m-%Y"), localization=False)
-            price = Decimal(data['market_data']['current_price']['aud'])
+            try:
+                price = Decimal(data['market_data']['current_price']['aud'])
+            except KeyError:
+                print(data)
+                if 'id' in data:
+                    if coin == hyETH:
+                        return getPrice(wstETH, date)
+                    return Decimal(0)
         savePrice(coin, price, date)
         return price
 

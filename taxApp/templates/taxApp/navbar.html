@@ -25,6 +25,7 @@
                         <ul class="dropdown-menu" aria-labelledby="ImportDropdown">
                             <li><a class="dropdown-item" href="{% url 'importExchange' %}">Import Exchange Trades</a></li>
                             <li><a class="dropdown-item" href="{% url 'importTransactions' %}">Import Onchain Transactions</a></li>
+                            <li><a class="dropdown-item" href="{% url 'manageCoins' %}">Manage Coins</a></li>
                             <li><a class="dropdown-item" href="{% url 'importTokens' %}">Import Tokens</a></li>
                             <li><a class="dropdown-item" href="{% url 'testAutocomplete' %}">testAutocomplete</a></li>
                         </ul>
@@ -35,6 +36,7 @@
                         </a>
                         <ul class="dropdown-menu" aria-labelledby="ReportsDropdown">
                             <li><a class="dropdown-item" href="{% url 'holdingsReport' %}">Holdings</a></li>
+                            <li><a class="dropdown-item" href="{% url 'coin_summary' %}">Coin Summary</a></li>
                             <li><a class="dropdown-item" href="{% url 'buysReport' %}">Purchases</a></li>
                             <li><a class="dropdown-item" href="{% url 'salesReport' %}">Sales</a></li>
                             <li><a class="dropdown-item" href="{% url 'spendsReport' %}">Spends</a></li>

@@ -13,7 +13,7 @@ from .forms import *
 from taxApp.importScripts.exchangeTrades import *
 from taxApp.importScripts.onchainTransactions import *
 from taxApp.taxScripts.cgt import createCGTEntries, calculateCGT, rollbackCGT
-from taxApp.taxScripts.reporting import getData, totalHoldings
+from taxApp.taxScripts.reporting import getData, totalHoldings, headlineReport
 from taxApp.taxScripts.transactionScreenshots import getScreenshot
 from taxApp.utils import getPrice, savePrice
 
@@ -140,31 +140,33 @@ def importTransactions(request):
         feesRunning = request.session['txFees status'] == "running"
         msg = "txFees is running"
 
-    if request.method == "POST":
-        current = Transaction.objects.get(pk=request.POST['current'])
-        if 'next' in request.POST:
-            tx = Transaction.objects.filter(
-                fromAddr__user=user,
-                date__gte=current.date, 
-                processed=False
-            ).exclude(pk=current.id).order_by('-date').first()
-            direction = "new"
-        elif 'prev' in request.POST:
-            tx = Transaction.objects.filter(
-                fromAddr__user=user,
-                date__lte=current.date, 
-                processed=False
-            ).exclude(pk=current.id).order_by('date').first()
-            direction = "old"
-
-        if not new:
-            tx = current
-            msg = f"Already at {direction}est transaction"
-    else:
-        tx = Transaction.objects.filter(fromAddr__user=user, processed=False).order_by('date').first()
+    # if request.method == "POST":
+    #     current = Transaction.objects.get(pk=request.POST['current'])
+    #     if 'next' in request.POST:
+    #         tx = Transaction.objects.filter(
+    #             fromAddr__user=user,
+    #             date__gte=current.date,
+    #             processed=False
+    #         ).exclude(pk=current.id).order_by('-date').first()
+    #         direction = "new"
+    #     elif 'prev' in request.POST:
+    #         tx = Transaction.objects.filter(
+    #             fromAddr__user=user,
+    #             date__lte=current.date,
+    #             processed=False
+    #         ).exclude(pk=current.id).order_by('date').first()
+    #         direction = "old"
+    #
+    #     if not new:
+    #         tx = current
+    #         msg = f"Already at {direction}est transaction"
+    # else:
+    #     tx = Transaction.objects.filter(fromAddr__user=user, processed=False).order_by('date').first()
 
     unprocessed = Transaction.objects.filter(fromAddr__user=user, processed=False).count()
-
+    txForm = TxForm()
+    ttxForm = TtxForm()
+    dexTradeForm = DexTradeForm()
             
 
     return render(request, 'import/transactions.html', {
@@ -173,7 +175,85 @@ def importTransactions(request):
         "message": msg,
         "running": feesRunning,
         "unprocessed": unprocessed,
+        "txForm": txForm,
+        "ttxForm": ttxForm,
+        "dexTradeForm": dexTradeForm,
     })
+
+@login_required
+def ajaxImportTx(request):
+    try:
+        assert request.method == "POST", "POST requests only"
+        user = request.user.cryptoTaxUser
+        msg = request.session.pop('msg', '')
+        ok = False
+        form = TxForm(request.POST)
+        if form.is_valid():
+            txHash = form.cleaned_data['hash']
+            chain = form.cleaned_data['chain']
+            try:
+                tx = Transaction.objects.get(hash=txHash, chain=chain)
+                msg = f"Transaction {txHash} already exists"
+            except Transaction.DoesNotExist:
+                tx = saveTx(txHash, chain)
+                if tx:
+                    msg = f"Transaction {txHash} saved successfully"
+                    ok = True
+                else:
+                    msg = f"Failed to save transaction {txHash}"
+
+        return JsonResponse({
+            'ok': ok,
+            'msg': msg,
+        })
+    except Exception as e:
+        print(traceback.format_exc())
+        print(e)
+        return JsonResponse({"ok":False, "msg":traceback.format_exc()})
+
+@login_required
+def ajaxImportTtx(request):
+    try:
+        assert request.method == "POST", "POST requests only"
+        user = request.user.cryptoTaxUser
+        msg = request.session.pop('msg', '')
+        ok = False
+        form = TtxForm(request.POST)
+        if form.is_valid():
+            txHash = form.cleaned_data['tx_hash']
+            try:
+                tx = Transaction.objects.get(hash=txHash)
+            except Transaction.DoesNotExist:
+                raise ValueError("Transaction does not exist")
+            coin = Coin.objects.get(pk=form.cleaned_data['coin_id'])
+            tokenAddress = form.cleaned_data['token_address']
+            token, _ = Token.objects.get_or_create(
+                address=tokenAddress,
+                chain = tx.chain,
+                coin = coin,
+            )
+            toAddress, _ = Address.objects.get_or_create(address=form.cleaned_data['to_address'])
+            fromAddress, _ = Address.objects.get_or_create(address=form.cleaned_data['from_address'])
+            quantity = form.cleaned_data['quantity']
+            ttx = TokenTransfer.objects.create(
+                transaction=tx,
+                coin=coin,
+                token=token,
+                fromAddr=fromAddress,
+                toAddr=toAddress,
+                value=quantity,
+            )
+            ok = True
+            msg = "Token transfer saved successfully"
+
+        return JsonResponse({
+            'ok': ok,
+            'msg': msg,
+        })
+    except Exception as e:
+        print(traceback.format_exc())
+        print(e)
+        return JsonResponse({"ok":False, "msg":traceback.format_exc()})
 
 @login_required
 def ajaxImportTransactions(request):
@@ -184,10 +264,14 @@ def ajaxImportTransactions(request):
         msg = request.session.pop('msg', '')
         ok = False
         saved = 0
+        errors = ""
         for addr in user.address_set.all():
             for ch in Chain.objects.all():
                 print(f"{ch.name} transactions for {addr.address}")
-                saved += saveTxHashes(addr, ch)
+                try:
+                    saved += saveTxHashes(addr, ch)
+                except Exception as e:
+                    errors += f"{e}. "
         msg = f"{saved} new transactions saved"
 
         return JsonResponse({
@@ -524,8 +608,6 @@ def ajaxProcessDexOops(request):
 def ajaxProcessDexTrade(request, txId):
     try:
         user = request.user.cryptoTaxUser
-        # if not has_permission(['wrlman', 'tmadm'], user):
-        #     raise PermissionDenied
         msg = request.session.pop('msg', '')
         ok = False
         tx = Transaction.objects.get(pk=txId)
@@ -538,6 +620,45 @@ def ajaxProcessDexTrade(request, txId):
     except Exception as e:
         print(traceback.format_exc())
         return JsonResponse({"ok":False, "msg":traceback.format_exc()})
+
+@login_required
+def ajaxCreateDexTrade(request):
+    try:
+        assert request.method == "POST", "POST requests only"
+        user = request.user.cryptoTaxUser
+        msg = request.session.pop('msg', '')
+        ok = False
+        form = DexTradeForm(request.POST)
+        if form.is_valid():
+            bought = {
+                "coin": form.cleaned_data['bought_coin'],
+                "units": form.cleaned_data['bought_units'],
+            }
+            sold = {
+                "coin": form.cleaned_data['sold_coin'],
+                "units": form.cleaned_data['sold_units'],
+            }
+            fee_coin = form.cleaned_data['fee_coin']
+            fee = form.cleaned_data['fee']
+            date = form.cleaned_data['date']
+            note = form.cleaned_data['note']
+            msg = createDexTrade(bought, sold, date, user, fee, fee_coin, note)
+            ok = True
+            errors = None
+        else:
+            errors = form.errors.as_json()
+            msg = "Details not updated."
+
+
+        return JsonResponse({
+            'ok': True,
+            'msg': msg,
+            'errors': errors,
+        })
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"ok":False, "msg":traceback.format_exc()})
+
 
 @login_required
 def ajaxNearestIncomingTransfer(request, txId):
@@ -860,6 +981,25 @@ def ajaxProcessInitialAirdrop(request):
         return JsonResponse({"ok":False, "msg":traceback.format_exc()})
 
 @login_required
+def ajaxProcessSpend(request, txId):
+    try:
+        assert request.method == "POST", "POST requests only"
+        user = request.user.cryptoTaxUser
+        msg = request.session.pop('msg', '')
+        ok = False
+        tx = Transaction.objects.get(pk=txId)
+        description = request.POST['note']
+        msg = processSpend(tx, description=description)
+
+        return JsonResponse({
+            'ok': True,
+            'msg': msg,
+        })
+    except Exception as e:
+        print(traceback.format_exc())
+        return JsonResponse({"ok":False, "msg":traceback.format_exc()})
+
+@login_required
 def ajaxProcessFailedTx(request, txId):
     try:
         user = request.user.cryptoTaxUser
@@ -951,6 +1091,37 @@ def testAutocomplete(request):
     })
 
 @login_required
+def manageCoins(request):
+    msg = request.session.pop('msg', '')
+    user = request.user.cryptoTaxUser
+
+
+    # Get coins the user has interacted with
+    # user_coins = Coin.objects.filter(
+    #     Q(buy__user=user) | Q(sale__user=user)#s |
+    #     # Q(income__user=user) | Q(spend__user=user)
+    # ).distinct().prefetch_related('token_set', 'token_set__chain')
+    # # Get other coins
+    # other_coins = Coin.objects.exclude(
+    #     id__in=user_coins
+    # ).prefetch_related('token_set', 'token_set__chain')
+    # # other_coins = Coin.objects.all()#.prefetch_related('token_set', 'token_set__chain')
+    # # other_coins = []
+
+    tokenForm = TokenForm()
+
+    context = {
+        # 'user_coins': user_coins,
+        # 'other_coins': other_coins,
+        "tokenForm": tokenForm,
+        "name":  user.name,
+        "user": user,
+        "message": msg,
+    }
+
+    return render(request, 'import/manageCoins.html', context)
+
+@login_required
 def importTokens(request):
     msg = request.session.pop('msg', '')
     user = request.user.cryptoTaxUser
@@ -982,30 +1153,36 @@ def importTokens(request):
 @login_required()
 def ajaxNewToken(request):
     try:
+        assert request.method == "POST", "POST requests only"
         user = request.user.cryptoTaxUser
-        # if not has_permission(['wrlman', 'tmadm'], user):
-        #     raise PermissionDenied
         msg = request.session.pop('msg', '')
         ok = False
-        if request.method == "POST":
-            form = newTokenForm(request.POST)
 
-            ok = True
-            errors = None
-            newToken = None
-            if form.is_valid():
-                n = form.save()
-                msg = "New token created successfully."
+        # form = newTokenForm(request.POST)
+        form = TokenForm(request.POST)
+        errors = None
+        if form.is_valid():
+            address = form.cleaned_data['address']
+            chain = form.cleaned_data['chain']
+            if "coin_id" in form.cleaned_data:
+                coin = Coin.objects.get(pk=form.cleaned_data['coin_id'])
+                token = Token.objects.create(
+                    address=address,
+                    chain=chain,
+                    coin=coin,
+                )
             else:
-                errors = form.errors.as_json()
-                msg = "Details not updated."
+                token = getOrCreateToken(address, chain)
+            msg = "New token created successfully."
+        else:
+            errors = form.errors.as_json()
+            msg = "Details not updated."
 
-            return JsonResponse({
-                'ok': ok,
-                'msg': msg,
-                'errors': errors,
-            })
-        return JsonResponse({"ok": ok, "msg": "a messssage"})
+        return JsonResponse({
+            'ok': ok,
+            'msg': msg,
+            'errors': errors,
+        })
     except Exception as e:
         print(traceback.format_exc())
         print(e)
@@ -1030,6 +1207,106 @@ def ajaxTokenNotSpam(request, tokenId):
 
 
 #reports
+
+@login_required
+def coin_summary(request):
+    msg = request.session.pop('msg', '')
+    user = request.user.cryptoTaxUser
+    form, fromDate, toDate, coin = getDatesAndCoin(request)
+    if not coin:
+        coin = Coin.objects.get(pk=1316) #BTC
+
+    # Fetch transactions
+    buys = Buy.objects.filter(user=user, coin=coin)#.annotate(total_cost=F('units') * F('unitPrice') + F('feeAUD'))
+    sales = Sale.objects.filter(user=user, coin=coin)#.annotate(total_proceeds=F('units') * F('unitPrice') - F('feeAUD'))
+    income = Income.objects.filter(user=user, coin=coin)#.annotate(total_income=F('units') * F('unitPrice'))
+    spends = Spend.objects.filter(user=user, coin=coin)#.annotate(total_spent=F('units') * F('unitPrice'))
+
+    # Apply date range
+    if fromDate and toDate:
+        buys = buys.filter(date__range=[fromDate, toDate])
+        sales = sales.filter(date__range=[fromDate, toDate])
+        income = income.filter(date__range=[fromDate, toDate])
+        spends = spends.filter(date__range=[fromDate, toDate])
+
+    #annotate total costs and proceeds
+    buys = buys.annotate(total_value=F('units') * F('unitPrice') + F('feeAUD'))
+    sales = sales.annotate(total_value=F('units') * F('unitPrice') - F('feeAUD'))
+    income = income.annotate(total_value=F('units') * F('unitPrice'))
+    spends = spends.annotate(total_value=F('units') * F('unitPrice'))
+
+
+    # Calculate totals
+    total_buys = buys.aggregate(total_spent=Coalesce(Sum('total_value'), Decimal(0)))['total_spent']
+    total_sales = sales.aggregate(total_proceeds=Coalesce(Sum('total_value'), Decimal(0)))['total_proceeds']
+    total_income = income.aggregate(total_income=Coalesce(Sum('total_value'), Decimal(0)))['total_income']
+    total_spends = spends.aggregate(total_spent=Coalesce(Sum('total_value'), Decimal(0)))['total_spent']
+
+    # Calculate current holdings
+    total_units_bought = buys.aggregate(total_units=Coalesce(Sum('units'), Decimal(0)))['total_units']
+    total_units_income = income.aggregate(total_units=Coalesce(Sum('units'), Decimal(0)))['total_units']
+    total_units_sold = sales.aggregate(total_units=Coalesce(Sum('units'), Decimal(0)))['total_units']
+    total_units_spent = spends.aggregate(total_units=Coalesce(Sum('units'), Decimal(0)))['total_units']
+    current_holding = total_units_bought + total_units_income - total_units_sold - total_units_spent
+
+    data = {
+        "buys": {
+            "txs": buys.order_by("-date"),
+            "total_value": total_buys,
+            "total_units": total_units_bought,
+        },
+        "sales": {
+            "txs": sales.order_by("-date"),
+            "total_value": total_sales,
+            "total_units": total_units_sold,
+        },
+        "income": {
+            "txs": income.order_by("-date"),
+            "total_value": total_income,
+            "total_units": total_units_income,
+        },
+        "spends": {
+            "txs": spends.order_by("-date"),
+            "total_value": total_spends,
+            "total_units": total_units_spent,
+        },
+    }
+
+    # costBasesRemaining = CostBasis.objects.filter(user=user, coin=coin, remaining__gt=0, date__lte=toDate)
+    # costBasesRemaining = costBasesRemaining.annotate(value=F('remaining') * F('unitPrice'))
+    # remainingCost = costBasesRemaining.aggregate(val=Coalesce(Sum("value"), Decimal(0)))['val']
+
+    # Calculate AUD value and profits
+    current_price = getPrice(coin, "now")
+    aud_value = current_holding * current_price
+    holdings = {
+        "units": current_holding,
+        "value": aud_value,
+        "avg": total_buys / total_units_bought if total_units_bought > 0 else 0,
+        "price": current_price,
+    }
+    print(total_units_bought / total_buys)
+    total_profits = total_income + total_sales + total_spends + aud_value - total_buys
+    realised_profits = total_sales + total_income + total_spends - (total_buys * (1 - ((current_holding - total_units_income) / total_units_bought))) if total_units_bought > 0 else 0
+    unrealised_profits = total_profits - realised_profits
+    profits = {
+        "total": total_profits,
+        "realised": realised_profits,
+        "unrealised": unrealised_profits,
+    }
+
+    context = {
+        "name":  user.name,
+        "user": user,
+        "message": msg,
+        "coin": coin,
+        "data": data,
+        "holdings": holdings,
+        "profits": profits,
+    }
+
+    return render(request, 'reports/coin_summary.html', context)
+
 
 @login_required
 def buysReport(request):
@@ -1416,7 +1693,26 @@ def taxReportCsv(request, year):
     coins = Coin.objects.filter(buy__user=user).distinct().order_by('symbol')
     for c in coins:
         getData(c, int(year), user, buffer)
-    filename = f"SAI Crypto Tax FY {year}.csv"
+    filename = f"SAI Crypto Tax FY {year} - full data.csv"
+    response = HttpResponse(buffer.getvalue(), content_type='text/csv')
+    response['Content-Disposition'] = f'attachment; filename={filename}'
+    buffer.close()
+    return response
+
+def taxReportCsvHeadlines(request, year):
+    msg = request.session.pop('msg', '')
+    user = request.user.cryptoTaxUser
+    #data: a list of dictionaries
+    #order: a list of strings (matching the keys of the dicts)
+    #filename: The name the file will be given (including extension)
+
+    #create a file-like buffer to store the file
+    buffer = StringIO()
+    # c = Coin.objects.get(symbol="eth")
+    coins = Coin.objects.filter(buy__user=user).distinct().order_by('symbol')
+    for c in coins:
+        getData(c, int(year), user, buffer, True)
+    filename = f"SAI Crypto Tax FY {year} - Coin Headlines.csv"
     response = HttpResponse(buffer.getvalue(), content_type='text/csv')
     response['Content-Disposition'] = f'attachment; filename={filename}'
     buffer.close()
@@ -1427,257 +1723,11 @@ def financialYearSummary(request, year):
     year = int(year)
     msg = request.session.pop('msg', '')
     user = request.user.cryptoTaxUser
-    startDate = datetime.datetime(year, 7, 1, tzinfo=ZoneInfo('Australia/Sydney'))
-    endDate = datetime.datetime(year+1, 6, 30)
-    endDate = datetime.datetime.combine(endDate, datetime.time.max, tzinfo=ZoneInfo('Australia/Sydney'))
-    earliestDate = Buy.objects.filter(user=user).order_by("date").first().date
-    prevYearsDate = [datetime.date(year-i, 6, 30) for i in [0, 1]]
 
-    #create a file-like buffer to store the file
-    buffer = StringIO()
-    writer = csv.writer(buffer)
-    holdingsClosing, totalClosing = totalHoldings(endDate, user)
-    holdingsOpening, totalOpening = totalHoldings(startDate, user)
-
-    holdings = [{
-        "coin": d["coin"],
-        "openingBalance": 0,
-        "closingBalance": d["holding"],
-        "openingValue": 0,
-        "closingValue": d["value"],
-        }
-        for d in holdingsClosing
-    ]
-
-    for d in holdingsOpening:
-        for dd in holdings:
-            if d["coin"] == dd["coin"]:
-                dd["openingBalance"] = d["holding"]
-                dd["openingValue"] = d["value"]
-                break
-        else:
-            holdings.append({
-                "coin": d["coin"],
-                "openingBalance": d["holding"],
-                "closingBalance": 0,
-                "openingValue": d["value"],
-                "closingValue": 0,
-                })
-
-    ##################
-    # Not for personal
-    audBalanceClosing = ExchangeAUDTransaction.objects.filter(
-        user = user,
-        date__lte = endDate,
-    ).aggregate(t = Sum('amount'))['t']
-
-    audBalanceOpening = ExchangeAUDTransaction.objects.filter(
-        user = user,
-        date__lte = startDate,
-    ).aggregate(t = Coalesce(Sum('amount'), Decimal(0.0)))['t']
-    
-    # end not for personal
-    #########################
-
-    writer.writerows([
-        ["Financial Year Summary"],
-        [f"{startDate.strftime('%d/%m/%Y')} - {endDate.strftime('%d/%m/%Y')}"],
-        [""],
-        ["Portfolio Valuation", "Opening", "Closing"],
-        ["Total Crypto Assets", f"{totalOpening:.2f}", f"{totalClosing:.2f}"],
-        ########################
-        # Not for personal
-        ["Total AUD Balance", f"{audBalanceOpening:.2f}", f"{audBalanceClosing:.2f}"],
-        ["Total", f"{totalOpening + audBalanceOpening:.2f}", f"{totalClosing + audBalanceClosing:.2f}"],
-        # end not for personal
-        ##########################3
-        [""],
-        [f"Allocation as at {endDate.strftime('%d/%m/%Y')}"],
-        ["Asset", "Opening Units", "Opening Value AUD", " Opening %", "Closing Units", "Closing Value AUD", " Closing %"]
-    ])
-    writer.writerows([
-        [
-            d['coin'].symbol, 
-            f"{d['openingBalance']:.4f}", 
-            f"{d['openingValue']:.2f}", 
-            f"{(100*d['openingValue']/totalOpening if totalOpening else 0):.2f}",
-            f"{d['closingBalance']:.4f}", 
-            f"{d['closingValue']:.2f}", 
-            f"{(100*d['closingValue']/totalClosing):.2f}",
-        ]
-        for d in holdings
-    ])
-
-    ##################
-    # for Stardust
-
-    capitalGain1yrPlus = 0
-    captialGain1yrMinus = 0
-    captialLoss = 0
-    CGTevents = CGTEvent.objects.filter(user=user, date__gte=startDate, date__lte=endDate)
-    for evt in CGTevents:
-        for cb in evt.cgttocostbasis_set.all():
-            if cb.grossGain < 0:
-                captialLoss += cb.grossGain
-            elif cb.discountable:
-                capitalGain1yrPlus += cb.grossGain
-            else:
-                captialGain1yrMinus += cb.grossGain
-    # totalCGL = CGTevents.aggregate(total=Sum("gain"))['total']
-    writer.writerows([
-        [""],
-        ["Total Gross Capital Gains/Losses", f"{capitalGain1yrPlus + captialGain1yrMinus + captialLoss:.2f}"],
-        ["Capital Gains on Assets held more than 1 year", f"{capitalGain1yrPlus:.2f}"],
-        ["Capital Gains on Assets held less than 1 year", f"{captialGain1yrMinus:.2f}"],
-        ["Capital Losses", f"{captialLoss:.2f}"],
-    ])
-
-    # end for stardust
-    #####################3
-
-    ################
-    # for personal
-    # CGTevents = CGTEvent.objects.filter(user=user, date__gte=startDate, date__lte=endDate)
-    #
-    # currYearGains = CGTtoCostBasis.objects.filter(
-    #     cgtEvent__in = CGTevents,
-    #     grossGain__gte = Decimal(0)
-    # )
-    # totalGrossGains = currYearGains.aggregate(t=Coalesce(Sum('grossGain'), Decimal(0)))['t']
-    # totalNetGains = currYearGains.aggregate(t=Coalesce(Sum('netGain'), Decimal(0)))['t']
-    # assert totalGrossGains >= totalNetGains, "something fishy, gross gains less than net gains"
-    # currYearLosses = CGTtoCostBasis.objects.filter(
-    #     cgtEvent__in = CGTevents,
-    #     grossGain__lt = Decimal(0)
-    # )
-    # totalGrossLosses = currYearLosses.aggregate(t=Coalesce(Sum('grossGain'), Decimal(0)))['t']
-    # totalNetLosses = currYearLosses.aggregate(t=Coalesce(Sum('netGain'), Decimal(0)))['t']
-    # assert totalGrossLosses <= totalNetLosses, "something fishy, gross losses greater than net losses"
-    #
-    #
-    # writer.writerows([
-    #     [""],
-    #     ["Total Gross Capital Gains", f"{totalGrossGains:.2f}"],
-    #     ["Total Gross Capital Losses", f"{totalGrossLosses:.2f}"],
-    #     ["After applying losses carried forward and CGT discount where applicable"],
-    #     ["Total Net Capital Gain", f"{totalNetGains:.2f}"],
-    #     ["Total Net Capital Loss", f"{totalNetLosses:.2f}"],
-    # ])
-
-    #end for personal
-    #####################
-
-
-
-    costs = CostBasis.objects.filter(user=user, date__lte=endDate)
-    totalCost = 0
-    #NOTE: This only works because we know CGT has only been calculated until the end date. This won't work if it's not the most recent 
-    costOfRemaining = 0
-    for cb in costs:
-        if cb.sourceString().startswith("Purchase"):
-            totalCost += cb.units * cb.unitPrice
-            costOfRemaining += cb.remaining * cb.unitPrice
-
-    proceeds = Sale.objects.filter(user=user, date__lte=endDate).aggregate(proceeds=Sum((F("units") * F("unitPrice")) - F("feeAUD")))['proceeds']
-
-
-
-    writer.writerows([
-        [""],
-        ['Cost and Proceeds'],
-        ['Total Cost of Purchases', f'{totalCost:.2f}'],
-        ['Total Proceeds of Sales', f'{proceeds:.2f}'],
-        [f"Cost of Cryptos held at {endDate.strftime('%d/%m/%Y')}", f'{costOfRemaining:.2f}']
-    ])
-
-
-    # r = ["Total Crypto Assets"]
-    # holdings, total = totalHoldings(endDate, user)
-    # r.append(f"${total:.2f}")
-    # writer.writerow(["Total Crypto Assets", f"${total:.2f}"])
-    # for d in prevYearsDate:
-    #     if d < earliestDate:
-    #         r.append("$0.00")
-    #     else:
-    #         _, t = totalHoldings(d, user)
-    #         r.append(f"${t:.2f}")
-
-    #Total income
-    income = Income.objects.filter(user=user, date__gte=startDate, date__lte=endDate).aggregate(t = Coalesce(Sum('amount'), Decimal(0)))['t']
-    writer.writerows([
-        [""],
-        ['Income'],
-        ['Total Income', f'{income:.2f}']
-    ])
-
-    ################
-    # for stardust
-
-    #fees
-    swyftxBuys = Buy.objects.filter(user=user, date__gte=startDate, date__lte=endDate, note__startswith = "Swyftx")
-    binanceBuys = Buy.objects.filter(user=user, date__gte=startDate, date__lte=endDate, note__startswith = "Binance")
-    swyftxSales = Sale.objects.filter(user=user, date__gte=startDate, date__lte=endDate, note__startswith = "Swyftx")
-    binanceSales = Sale.objects.filter(user=user, date__gte=startDate, date__lte=endDate, note__startswith = "Binance")
-
-    swyftxSalesDistinct = []
-    binanceSalesDistinct = []
-
-    for s in swyftxSales:
-        if not swyftxBuys.filter(date=s.date).exists():
-            swyftxSalesDistinct.append(s.id)
-
-    for s in binanceSales:
-        if not binanceBuys.filter(date=s.date).exists():
-            binanceSalesDistinct.append(s.id)
-
-    swyftxSales = swyftxSales.filter(pk__in=swyftxSalesDistinct)
-    binanceSales = binanceSales.filter(pk__in=binanceSalesDistinct)
-
-    swyftxBuys = swyftxBuys.aggregate(t = Sum('feeAUD'))['t']
-    binanceBuys = binanceBuys.aggregate(t = Sum('feeAUD'))['t']
-    swyftxSales = swyftxSales.aggregate(t = Coalesce(Sum('feeAUD'), Decimal(0.0)))['t']
-    binanceSales = binanceSales.aggregate(t = Coalesce(Sum('feeAUD'), Decimal(0.0)))['t']
-
-    withdrawals = ExchangeWithdrawal.objects.filter(user=user, date__gte=startDate, date__lte=endDate)
-    withdrawals = withdrawals.aggregate(t = Sum('feeAUD'))['t']
-
-    transactionFees = Transaction.objects.filter(fromAddr__user=user, date__gte=startDate, date__lte=endDate)
-    transactionFees = transactionFees.aggregate(t = Sum('feeAUD'))['t']
-
-    writer.writerows([
-        [""],
-        ["Fees", f"{swyftxBuys + binanceBuys + swyftxSales + binanceSales + withdrawals + transactionFees:.2f}"],
-        ["Centralised Exchange Brokerage Fees", f"{swyftxBuys + binanceBuys + swyftxSales + binanceSales:.2f}"],
-        ["Centralised Exchange Withdrawal Fees", f"{withdrawals:.2f}"],
-        ["Onchain Transaction Fees", f"{transactionFees:.2f}"]
-    ])
-
-    audTransactions = ExchangeAUDTransaction.objects.filter(
-        user=user,
-        date__gte=startDate,
-        date__lte=endDate
-    )
-
-    audDeposits = audTransactions.filter(note__icontains="deposit").aggregate(t = Coalesce(Sum('amount'), Decimal(0.0)))['t']
-    audWithdrawals = audTransactions.filter(note__icontains="withdrawal").aggregate(t = Coalesce(Sum('amount'), Decimal(0.0)))['t']
-    audPurchases = audTransactions.filter(note__icontains="purchase").aggregate(t = Coalesce(Sum('amount'), Decimal(0.0)))['t']
-    audSales = audTransactions.filter(note__icontains="sell").aggregate(t = Coalesce(Sum('amount'), Decimal(0.0)))['t']
-
-    writer.writerows([
-        [""],
-        ["AUD Transactions"],
-        ["Deposits", f"{audDeposits:.2f}"],
-        ["Withdrawals", f"{audWithdrawals:.2f}"],
-        ["Crypto Purchases (incl Fees)", f"{audPurchases:.2f}"],
-        ["Crypto Sales (incl Fees)", f"{audSales:.2f}"],
-
-    ])
-
-    # end for stardust
-    ##########################
+    buffer = headlineReport(user, year)
 
     #stardust
-    filename = f"SAI Financial Year Summary {year}.csv"
+    filename = f"SAI Financial Year Summary {year+1}.csv"
     #personal
     # filename = f"Financial Year Summary {year}.csv"
 
@@ -1882,8 +1932,8 @@ def ajaxTestScreenshot(request, txId):
 def ajaxSearchCoins(request):
     query = request.GET['q']
     # print (query)
-    coins = Coin.objects.filter(name__icontains=query).values('id', 'name').order_by('id')
-    results = [{'value': j['id'], 'text': f"{j['id']} - {j['name']}"} for j in coins]
+    coins = Coin.objects.filter(name__icontains=query).values('id', 'name', 'symbol').order_by('id')
+    results = [{'value': j['id'], 'text': f"{j['id']} - {j['symbol']} - {j['name']}"} for j in coins]
     # print(results)
     return JsonResponse(results, safe=False)
 
@@ -1898,7 +1948,7 @@ def ajaxSearchCoinsOfUser(request):
     coins = Coin.objects.filter(
         Q(buy__user=user) | Q(income__user=user),
         name__icontains=query
-    ).distinct().values('id', 'name').order_by('id')
-    results = [{'value': j['id'], 'text': f"{j['id']} - {j['name']}"} for j in coins]
-    print(results)
+    ).distinct().values('id', 'name', 'symbol').order_by('id')
+    results = [{'value': j['id'], 'text': f"{j['id']} - {j['symbol']} - {j['name']}"} for j in coins]
+    # print(results)
     return JsonResponse(results, safe=False)

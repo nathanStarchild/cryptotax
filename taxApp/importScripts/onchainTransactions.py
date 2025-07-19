@@ -32,7 +32,7 @@ def getWeb3(chain):
     api_key = os.environ.get(f"ALCHEMY_APIKEY")
     url = f"{chain.endpoint}{api_key}"
     web3 = Web3(Web3.HTTPProvider(url))
-    if chain.name in ["Polygon POS", "Optimism"]:
+    if chain.name in ["Polygon POS", "Optimism", "Mantle"]:
         web3.middleware_onion.inject(geth_poa_middleware, layer=0)
     return web3
 
@@ -82,7 +82,11 @@ def saveTxHashes(address, chain):
         response = requests.post(url, json=payload, headers=headers)
 
         dat = json.loads(response.text)
-        txs = dat['result']['transfers']
+        try:
+            txs = dat['result']['transfers']
+        except:
+            print(dat)
+            raise ValueError(f"api call failed: {dat['error']['message']}")
         try:
             pageKey = dat['result']['pageKey']
         except KeyError:
@@ -316,11 +320,13 @@ def saveIncomingInternalTxs(toAddress, chain):
 
 def tryInternalsByHash(txHash, chain):
     queryString = f"?module=account&action=txlistinternal&txhash={txHash}"
-    if not chain.name == "ZKsync Era":
+    if not chain.name in ["ZKsync Era", "Mantle"]:
         api_key = os.environ.get(f"EXPLORER_APIKEY_{chain.symbol}")
         queryString += f"&apikey={api_key}"
     if chain.name == "ZKsync Era":
         url = f"https://block-explorer-api.mainnet.zksync.io/api{queryString}"
+    elif chain.name == "Mantle":
+        url = f"https://block-explorer-api.mainnet.mantle.xyz/api{queryString}"
     else:
         if chain.name == "Optimism":
             url = f"https://api-{chain.explorer}/api{queryString}"
@@ -337,11 +343,13 @@ def tryInternalsByHash(txHash, chain):
 
 def getInternalsFromExplorer(address, chain):
     queryString = f"?module=account&action=txlistinternal&address={address.address}&startblock=0&endblock=99999999&page=1&offset=99"
-    if not chain.name == "ZKsync Era":
+    if not chain.name in ["ZKsync Era", "Mantle"]:
         api_key = os.environ.get(f"EXPLORER_APIKEY_{chain.symbol}")
         queryString += f"&apikey={api_key}"
     if chain.name == "ZKsync Era":
         url = f"https://block-explorer-api.mainnet.zksync.io/api{queryString}"
+    elif chain.name == "Mantle":
+        url = f"https://block-explorer-api.mainnet.mantle.xyz/api{queryString}"
     else:
         if chain.name == "Optimism":
             url = f"https://api-{chain.explorer}/api{queryString}"
@@ -829,6 +837,7 @@ def processBridgeSend(tx, ttx=None, web3=None, decodedLogs=None):
     )
     bs.save()
     tx.processed = True
+    tx.note = f"Processed as bridge send {bs.id}"
     tx.save()
     print("TokenBridge created")
     return "processed as TokenBridge"
@@ -1114,8 +1123,54 @@ def processDexTrade(tx, bought=None, sold=None):
     s.savePrice()
     print('sale entered')
     tx.processed = True
+    tx.note = f"processed as dex trade buy {b.id} and sale {s.id}"
     tx.save()
     return "dex trade entered"
+
+def createDexTrade(bought, sold, date, user, fee, feeCoin, note, refId=None):
+    """
+    Create a dex trade buy and sale entry.
+    bought and sold should be dicts with keys: coin, units
+    """
+    sold['price'] = getPrice(sold['coin'], date)
+    bought['price'] = sold['price'] * sold['units'] / bought['units']
+    feeAUD = fee * getPrice(feeCoin, date)
+
+    b = Buy(
+        coin=bought['coin'],
+        units=bought['units'],
+        unitPrice=bought['price'],
+        date=date,
+        user=user,
+        feeAUD=feeAUD,
+        fee = fee,
+        feeCoin = feeCoin,
+        note=note,
+        refId=refId,
+    )
+    b.save()
+    b.refresh_from_db()
+    b.savePrice()
+    b.createCostBasis()
+    print('buy order entered')
+
+    s = Sale(
+        coin=sold['coin'],
+        units=sold['units'],
+        unitPrice=sold['price'],
+        date=date,
+        user=user,
+        feeAUD=feeAUD,
+        fee = fee,
+        feeCoin = feeCoin,
+        note=note,
+        refId=refId,
+    )
+    s.save()
+    s.savePrice()
+    print('sale entered')
+
+    return "trade created successfully"
 
 def processHarvest(tx):
     if isFailedTx(tx):
@@ -1147,6 +1202,7 @@ def processHarvest(tx):
         income.createCostBasis()
         print("cost basis created")
         tx.processed = True
+        tx.note = f"processed as harvest income {income.id}"
         tx.save()
     else:
         first = True
@@ -1172,6 +1228,7 @@ def processHarvest(tx):
             income.createCostBasis()
             print("cost basis created")
             tx.processed = True
+            tx.note = f"processed as harvest income {income.id}"
             tx.save()
     return("Income saved")
 
@@ -1222,8 +1279,29 @@ def processInitialAirdrop(ttx, subtractFee=False, note="Airdrop at token launch"
         income.createCostBasis(fee=ttx.transaction.feeAUD if not subtractFee else Decimal(0))
         print("cost basis created")
     ttx.transaction.processed = True
+    ttx.transaction.note = f"Processed as airdrop income {income.id}"
     ttx.transaction.save()
     return "airdrop saved"
+
+def processSpend(tx, web3=None, description="Spend on purchase (not a trade)"):
+    if web3 is None:
+        web3 = getWeb3(tx.chain)
+    if tx.value == Decimal(0):
+        raise ValueError(f"Transaction {tx.hash} has no value. Cannot process spend.")
+    price = getPrice(tx.feeCoin, tx.date)
+    spend = Spend.objects.create(
+        coin=tx.feeCoin,
+        units=tx.value,
+        unitPrice=price,
+        date=tx.date,
+        user=tx.fromAddr.user,
+        note=f"transaction {tx.id}",
+        description=f"{description}, tx: {tx.hash}",
+    )
+    tx.processed = True
+    tx.note = f"Processed as spend {spend.id}"
+    tx.save()
+    return "Spend saved successfully"
 
 def processFailedTx(tx):
     income = Income.objects.create(
@@ -1237,6 +1315,7 @@ def processFailedTx(tx):
         transaction=tx
     )
     tx.processed = True
+    tx.note = f"Processed as failed transaction income {income.id}"
     tx.save()
     print("Failed transaction saved as loss")
     return "Failed transaction saved as loss"
@@ -1443,6 +1522,8 @@ def getABI(contractAddress, chain):
         # print("downloading abi")
         if chain.name == "ZKsync Era":
             url = f"https://block-explorer-api.mainnet.zksync.io/api?module=contract&action=getabi&address={contractAddress}"
+        elif chain.name == "Mantle":
+            url = f"https://{chain.explorer}/api/v2/smart-contracts/{contractAddress}"
         else:
             api_key = os.environ.get(f"EXPLORER_APIKEY_{chain.symbol}")
             if chain.name == "Optimism":

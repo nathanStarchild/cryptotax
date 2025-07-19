@@ -91,6 +91,10 @@
                         <th>Processed</th>
                         <td>{% if tx.processed %}<i class="fas fa-check"></i>{% endif %}</td>
                     </tr>
+                    <tr>
+                        <th>Note</th>
+                        <td>{% if tx.note %}{{ tx.note }}{% endif %}</td>
+                    </tr>
                 </tbody>
             </table>
 
@@ -109,7 +113,8 @@
                                 <button class="btn btn-primary btn-cowSwap m-1">As CoW Swap</button>  
                                 <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxProcessHarvest' tx.id %}">As Harvest()</button>  
                                 <button type="button" class="btn btn-primary btn-incoming m-1" data-bs-target="#selectIncoming" data-bs-toggle="collapse" data-action="{% url 'ajaxProcessIncome' %}">As income</button> 
-                                <button type="button" class="btn btn-primary btn-incoming m-1" data-bs-target="#selectIncoming" data-bs-toggle="collapse" data-action="{% url 'ajaxProcessInitialAirdrop' %}">As Airdrop at launch</button> 
+                                <button type="button" class="btn btn-primary btn-incoming m-1" data-bs-target="#selectIncoming" data-bs-toggle="collapse" data-action="{% url 'ajaxProcessInitialAirdrop' %}">As Airdrop at launch</button>
+                                <button class="btn btn-primary btn-form m-1" data-form="#addNoteForm" data-bs-target="#addNote" data-bs-toggle="collapse" data-action="{% url 'ajaxProcessSpend' tx.id %}">As Spend</button>
                                 <button class="btn btn-primary processBtn m-1" data-url="{% url 'ajaxProcessFailedTx' tx.id %}">As Failed</button>  
                             </div>
                             <div class="mt-2 d-flex flex-row justify-content-center">
@@ -128,6 +133,23 @@
                                 <button class="btn btn-primary matchingBtn m-1" data-url="{% url 'ajaxFindMatchingTxs' tx.id %}">Find Matching Txs</button>  
                             </div>
 
+
+                            <div id="addNote" class="collapse mt-2">
+                                <form id="addNoteForm" method="post" action="tmp">
+                                    {% csrf_token %}
+                                    <div class="d-flex flex-column justify-content-center">
+                                        <div class="mt-1">
+                                            <label>Note:
+                                                <input type="text" class="form-control" name="note">
+                                            </label>
+                                        </div>
+                                        <div class="mt-1">
+                                            <button id="submitNote" data-form="addNoteForm" type="button" class="btn btn-primary btn-submit">Submit</button>
+                                        </div>
+                                    </div>
+
+                                </form>
+                            </div>
 
                             <div id="selectIncoming" class="collapse mt-2">
                                 <form id="incomingForm" method="post" action="tmp">                                                    
@@ -464,6 +486,7 @@
                 $("#message").slideUp();
                 let form = $(this).data('form')
                 let res = await postForm($(`#${form}`))
+                console.log(res)
                 if (res.msg){
                     $("#messageContent").text(res.msg);
                     $("#message").slideDown();
@@ -486,6 +509,10 @@
                         }
                     }
                 }
+            })
+
+            $(".btn-form").click(function() {
+                $($(this).data("form")).attr("action", $(this).data("action"))
             })
 
             $(".btn-incoming").click(function() {
