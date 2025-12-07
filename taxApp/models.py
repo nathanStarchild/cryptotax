@@ -85,6 +85,7 @@ class Chain(models.Model):
     endpoint = models.CharField(max_length=120)
     explorer = models.CharField(max_length=120, blank=True, null=True)
     feeCoin = models.ForeignKey(Coin, on_delete=models.CASCADE, blank=True, null=True)
+    chain_id = models.IntegerField(blank=True, null=True)
     
     class Meta:
         managed = True

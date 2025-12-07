@@ -18,6 +18,7 @@ import traceback
 from importlib import import_module
 from django.conf import settings
 from django.db import transaction, connection
+from django.db.utils import IntegrityError
 from django.db.models import Sum
 from django.db.models.functions import Coalesce
 
@@ -221,8 +222,13 @@ def saveTx(hash, chain, web3=None):
     tx = web3.eth.get_transaction(hash)
     timestamp = web3.eth.get_block(tx.blockHash).timestamp
     d = datetime.datetime.fromtimestamp(timestamp).astimezone(ZoneInfo('UTC'))
-    fromAddr, _ = Address.objects.get_or_create(address=tx['from'])
-    toAddr, _ = Address.objects.get_or_create(address=tx['to'])
+    try:
+        fromAddr, _ = Address.objects.get_or_create(address=tx['from'])
+        toAddr, _ = Address.objects.get_or_create(address=tx['to'])
+    except IntegrityError:
+        print("IntegrityError on address get_or_create")
+        print(tx)
+        raise
 
     t, created = Transaction.objects.get_or_create(
         fromAddr = fromAddr,
@@ -275,7 +281,12 @@ def saveIncomingInternalTxs(toAddress, chain):
         try: 
             txs = getInternalsFromExplorer(toAddress, chain)['result']
             fromExplorer = True
+            print(txs)
         except KeyError:
+            return 0
+        except ValueError as e:
+            # TODO: fix
+            print(str(e))
             return 0
     saved = 0
     for tx in txs:
@@ -284,6 +295,9 @@ def saveIncomingInternalTxs(toAddress, chain):
             print('already exists')
         except Transaction.DoesNotExist:
             t = saveTx(tx['hash'], chain, web3)
+        except TypeError:
+            print(chain, tx)
+            raise
 
         txFromAddr, _ = Address.objects.get_or_create(address=tx['from'])
         txToAddr, _ = Address.objects.get_or_create(address=tx['to'])
@@ -319,19 +333,21 @@ def saveIncomingInternalTxs(toAddress, chain):
     return saved
 
 def tryInternalsByHash(txHash, chain):
-    queryString = f"?module=account&action=txlistinternal&txhash={txHash}"
-    if not chain.name in ["ZKsync Era", "Mantle"]:
-        api_key = os.environ.get(f"EXPLORER_APIKEY_{chain.symbol}")
-        queryString += f"&apikey={api_key}"
-    if chain.name == "ZKsync Era":
-        url = f"https://block-explorer-api.mainnet.zksync.io/api{queryString}"
-    elif chain.name == "Mantle":
-        url = f"https://block-explorer-api.mainnet.mantle.xyz/api{queryString}"
-    else:
-        if chain.name == "Optimism":
-            url = f"https://api-{chain.explorer}/api{queryString}"
-        else:
-            url = f"https://api.{chain.explorer}/api{queryString}"
+    api_key = os.environ.get(f"EXPLORER_APIKEY")
+    queryString = f"?chainid={chain.chain_id}&module=account&action=txlistinternal&txhash={txHash}&apikey={api_key}"
+    url = f"https://api.etherscan.io/v2/api{queryString}"
+    # if not chain.name in ["ZKsync Era", "Mantle"]:
+    #     api_key = os.environ.get(f"EXPLORER_APIKEY")
+    #     queryString += f"&apikey={api_key}"
+    # if chain.name == "ZKsync Era":
+    #     url = f"https://block-explorer-api.mainnet.zksync.io/api{queryString}"
+    # elif chain.name == "Mantle":
+    #     url = f"https://block-explorer-api.mainnet.mantle.xyz/api{queryString}"
+    # else:
+    #     if chain.name == "Optimism":
+    #         url = f"https://api-{chain.explorer}/api{queryString}"
+    #     else:
+    #         url = f"https://api.{chain.explorer}/api{queryString}"
 
     response = requests.get(url)
     dat = json.loads(response.text)
@@ -342,26 +358,32 @@ def tryInternalsByHash(txHash, chain):
 
 
 def getInternalsFromExplorer(address, chain):
-    queryString = f"?module=account&action=txlistinternal&address={address.address}&startblock=0&endblock=99999999&page=1&offset=99"
-    if not chain.name in ["ZKsync Era", "Mantle"]:
-        api_key = os.environ.get(f"EXPLORER_APIKEY_{chain.symbol}")
-        queryString += f"&apikey={api_key}"
-    if chain.name == "ZKsync Era":
-        url = f"https://block-explorer-api.mainnet.zksync.io/api{queryString}"
-    elif chain.name == "Mantle":
-        url = f"https://block-explorer-api.mainnet.mantle.xyz/api{queryString}"
-    else:
-        if chain.name == "Optimism":
-            url = f"https://api-{chain.explorer}/api{queryString}"
-        else:
-            url = f"https://api.{chain.explorer}/api{queryString}"
+    api_key = os.environ.get(f"EXPLORER_APIKEY")
+    queryString = f"?chainid={chain.chain_id}&module=account&action=txlistinternal&address={address.address}&startblock=0&endblock=99999999&page=1&offset=99&apikey={api_key}"
+    url = f"https://api.etherscan.io/v2/api{queryString}"
+    # queryString = f"?module=account&action=txlistinternal&address={address.address}&startblock=0&endblock=99999999&page=1&offset=99"
+    # if not chain.name in ["ZKsync Era", "Mantle"]:
+    #     api_key = os.environ.get(f"EXPLORER_APIKEY_{chain.symbol}")
+    #     queryString += f"&apikey={api_key}"
+    # if chain.name == "ZKsync Era":
+    #     url = f"https://block-explorer-api.mainnet.zksync.io/api{queryString}"
+    # elif chain.name == "Mantle":
+    #     url = f"https://block-explorer-api.mainnet.mantle.xyz/api{queryString}"
+    # else:
+    #     if chain.name == "Optimism":
+    #         url = f"https://api-{chain.explorer}/api{queryString}"
+    #     else:
+    #         url = f"https://api.{chain.explorer}/api{queryString}"
 
     response = requests.get(url)
     dat = json.loads(response.text)
+    # print(dat)
     # for k in dat['result']:
     #     # print(k['to'])
     #     print(k)
     #     print()
+    if not dat['status'] == "1":
+        raise ValueError(dat['result'])
     return dat
 
 
@@ -399,18 +421,37 @@ def saveIncomingTokenTransfers(toAddress, chain):
     except KeyError:
         return 0
     saved = 0
+    skippedHashes = []
     for tx in txs:
+        if tx['hash'] in skippedHashes:
+            continue
         if not tx['to']:
             print(f"no to address. skipping {tx['hash']}")
+            continue
+        if tx['asset'] is not None and tx['asset'].startswith('Visit website'):
+            print(f"spam. {tx['asset']}. skipping {tx['hash']}")
+            skippedHashes.append(tx['hash'])
             continue
         try:
             t = Transaction.objects.get(chain=chain, hash=tx['hash'])
             # print('already exists')
         except Transaction.DoesNotExist:
-            t = saveTx(tx['hash'], chain, web3)
+            # print(tx)
+            try:
+                t = saveTx(tx['hash'], chain, web3)
+            except IntegrityError:
+                print("IntegrityError on saveTx")
+                # print(tx)
+                continue
+            print("all g")
 
-        txFromAddr, _ = Address.objects.get_or_create(address=tx['from'])
-        txToAddr, _ = Address.objects.get_or_create(address=tx['to'])
+        try:
+            txFromAddr, _ = Address.objects.get_or_create(address=tx['from'])
+            txToAddr, _ = Address.objects.get_or_create(address=tx['to'])
+        except IntegrityError:
+            print("IntegrityError on address get_or_create")
+            print(tx)
+            raise
         tokenAddr = tx['rawContract']['address']
         token = getOrCreateToken(tokenAddr, chain, web3)
         if tx['value'] is None:
@@ -1520,16 +1561,19 @@ def getABI(contractAddress, chain):
         # print("loading ABI from db")
     except Contract.DoesNotExist:
         # print("downloading abi")
-        if chain.name == "ZKsync Era":
-            url = f"https://block-explorer-api.mainnet.zksync.io/api?module=contract&action=getabi&address={contractAddress}"
-        elif chain.name == "Mantle":
-            url = f"https://{chain.explorer}/api/v2/smart-contracts/{contractAddress}"
-        else:
-            api_key = os.environ.get(f"EXPLORER_APIKEY_{chain.symbol}")
-            if chain.name == "Optimism":
-                url = f"https://api-{chain.explorer}/api?module=contract&action=getabi&address={contractAddress}&apikey={api_key}"
-            else:
-                url = f"https://api.{chain.explorer}/api?module=contract&action=getabi&address={contractAddress}&apikey={api_key}"
+        api_key = os.environ.get(f"EXPLORER_APIKEY")
+        queryString = f"?chainid={chain.chain_id}&module=contract&action=getabi&address={contractAddress}&apikey={api_key}"
+        url = f"https://api.etherscan.io/v2/api{queryString}"
+        # if chain.name == "ZKsync Era":
+        #     url = f"https://block-explorer-api.mainnet.zksync.io/api?module=contract&action=getabi&address={contractAddress}"
+        # elif chain.name == "Mantle":
+        #     url = f"https://{chain.explorer}/api/v2/smart-contracts/{contractAddress}"
+        # else:
+        #     api_key = os.environ.get(f"EXPLORER_APIKEY_{chain.symbol}")
+        #     if chain.name == "Optimism":
+        #         url = f"https://api-{chain.explorer}/api?module=contract&action=getabi&address={contractAddress}&apikey={api_key}"
+        #     else:
+        #         url = f"https://api.{chain.explorer}/api?module=contract&action=getabi&address={contractAddress}&apikey={api_key}"
         contract = Contract(address=contractAddress, chain=chain)
         contract.saveABI(requests.get(url).text)
         # assert False, 'yep'
